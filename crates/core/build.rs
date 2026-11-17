@@ -7,7 +7,9 @@ fn main() {
     if target == "arm-unknown-linux-gnueabihf" {
         println!("cargo:rustc-env=PKG_CONFIG_ALLOW_CROSS=1");
         println!("cargo:rustc-link-search=target/mupdf_wrapper/Kobo");
-        println!("cargo:rustc-link-search=libs");
+        println!("cargo:rerun-if-env-changed=CAESAR_KOBO_LINK_LIBS");
+        let libraries = env::var("CAESAR_KOBO_LINK_LIBS").unwrap_or_else(|_| "libs".into());
+        println!("cargo:rustc-link-search={}", libraries);
         println!("cargo:rustc-link-lib=dylib=stdc++");
     // Handle the Linux and macOS platforms.
     } else {

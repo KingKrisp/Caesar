@@ -41,6 +41,7 @@ pub mod dictionary;
 pub mod calculator;
 pub mod sketch;
 pub mod gallery;
+pub mod file_actions;
 pub mod notes;
 pub mod preferences;
 pub mod touch_events;
@@ -321,6 +322,7 @@ pub enum Event {
     EditLanguages,
     Define(String),
     Submit(ViewId, String),
+    FileChanged(PathBuf, Option<PathBuf>),
     Slider(SliderId, f32, FingerStatus),
     ToggleNear(ViewId, Rectangle),
     ToggleInputHistoryMenu(ViewId, Rectangle),
@@ -417,6 +419,8 @@ pub enum ViewId {
     SketchMenu,
     RenameDocument,
     RenameDocumentInput,
+    FileActions,
+    FileNameInput,
     GoToPage,
     GoToPageInput,
     GoToResultsPage,
@@ -582,6 +586,12 @@ pub enum EntryId {
     TakeScreenshot,
     GalleryFolder(bool),
     GalleryOpen(usize),
+    GalleryFile(usize),
+    NoteFile(usize),
+    FileRename,
+    FileRenameSave,
+    FileDelete,
+    FileDeleteConfirm,
     NoteNew,
     NoteOpen(usize),
     NoteChanged,

@@ -1,67 +1,76 @@
-# Caesar local installation handoff
+# Caesar Kobo installation
 
-This checkout contains Caesar's source changes. It is **not a device-tested Kobo
-release** and does not include the cloud workspace's compiled desktop binaries or
-its locally installed build dependencies.
+## Current validation
 
-## Implemented and checked
+Caesar was installed on a Kobo Clara HD (model 376), reporting firmware
+4.8.10959. The owner confirmed boot, book reading, Gallery, Notes and Settings.
+The compatible application names remain `plato` / `plato.sh`.
 
-- Numeric series sorting, including decimal indices such as `11.0`.
-- Applications → Gallery for screenshots and saved sketches.
-- Applications → Notes with a multiline keyboard editor, Markdown files, and preview.
-- Settings with persistent preferences, reader bindings, and global shortcuts.
-- Offline-only operation, disabled fetcher hooks, and deny stubs for old Wi-Fi
-  enable and stock-interface launcher scripts.
+The latest installation adds file rename/delete actions, clearer Settings,
+a `Books`-only library view and persistent Caesar startup with recovery. Numeric
+series sorting handles decimal indices such as `10.0` and `11.0`. A copy of the
+device metadata was checked: 59 book entries, with all 13 *A Series of
+Unfortunate Events* books ordered numerically from 1 through 13.
 
-Validation completed in the cloud workspace:
+Validation executed locally:
 
-```sh
-cargo test --locked -p plato-core
-python3 tests/test_offline.py
-cargo build --locked -p emulator -p plato -p importer
-```
+- ARM release build and legacy-loader startup check under QEMU.
+- 54 ARM core tests plus a UI flow test covering portrait and landscape.
+- Seven recovery-launcher tests, including persistent startup, SIGSEGV fallback,
+  and recovery after an incomplete startup.
+- Offline script checks: three passed, one Linux-interface check skipped on macOS.
 
-The 49 core tests and 4 mocked radio/launcher tests passed. The desktop builds
-passed. Emulator checks used Clara HD resolution and covered saved settings,
-disabled/remapped reader inputs, orientation and dark mode across restarts,
-gallery navigation, and note typing, formatting, saving, reopening, and sleep saving.
-The radio tests mock system commands and do not establish hardware radio state.
+These checks do not establish permanent radio shutdown by unrelated boot
+services. Full lighting, sleep/wake and every preference still need hardware
+checks when changing those paths. The system startup script was not inspected
+or modified; the compatible application entry point was verified on hardware.
 
-See [BUILD.md](BUILD.md) for dependencies and the separate Kobo ARM build process.
-The Kobo target is `arm-unknown-linux-gnueabihf`; the successful host build of the
-`plato` package is not a substitute for that ARM build. Binary and launcher names
-remain `plato` / `plato.sh` for compatibility; the application identifies as Caesar.
+## Build the ARM version
 
-## Existing device setup
+Follow [BUILD.md](BUILD.md). Apple Silicon instructions use the official old
+Kobo sysroot with native Clang/LLD and preserve the original runtime libraries.
+A desktop `plato` build is not a Kobo build.
 
-The owner's Kobo already boots directly into Plato through a modified system
-startup script, possibly `rcS`. The exact model, firmware, script path, and script
-contents still need inspection. The likely model is Clara HD, not yet confirmed.
-No device boot files, partitions, or SD-card contents were modified in the cloud.
-Preserve direct boot into the reader when installing Caesar.
+The first Mac-produced ARM build failed before `main` because LLD separated two
+dynamic relocation tables that the old ARM loader expects to be adjacent. The
+tracked linker layout and Mac build helper prevent that failure. Do not remove
+the layout correction or deploy an unchecked replacement binary.
 
-## Local installation work still required
+## Preserve the existing library
 
-1. Identify the SD card and its partitions without changing them. Confirm the
-   device model and firmware from its files.
-2. Before writing, make and verify a full image of the entire card while its
-   partitions are unmounted. Store the image on another drive. A file copy alone
-   does not preserve partition tables and boot data.
-3. Inspect the actual boot script and installation paths. Keep backups of the
-   working Plato installation, configuration, reading states, books, notes,
-   sketches, and boot script, with a concrete rollback procedure.
-4. Build and check the ARM binary, its shared libraries, and distribution contents
-   for the confirmed Kobo. Do not copy desktop binaries onto the card.
-5. Review launcher behavior before installation: Caesar's packaged launcher powers
-   off on exit instead of launching Nickel. Its `nickel.sh` and `wifi-enable.sh`
-   are deny stubs. Integrate these semantics with the existing direct-boot script;
-   do not blindly replace the device's system startup file.
-6. Install with the rollback files preserved, then test boot, reading, touch,
-   lighting, sleep/wake, USB mass storage, and the new apps on the actual Kobo.
-7. Verify radio/interface shutdown and inspect any other boot services before
-   declaring the whole device permanently offline. Caesar's software policy does
-   not by itself verify what unrelated firmware or startup services do.
+Keep the library root at `/mnt/onboard`. Set `content-path = "Books"` in its
+`[[libraries]]` entry; [Library-sample.toml](../contrib/Library-sample.toml) shows
+that entry. This filters browsing/import without relocating books, notes,
+captures, metadata or reading states. See [LIBRARY.md](LIBRARY.md).
 
-The local Codex session needs filesystem access to the mounted card. Do not format,
-repartition, flash a full image, or overwrite device-specific boot data as part of
-an ordinary application installation.
+To retain that folder choice across an emergency stock-Plato boot, put `Books`
+on one line in `.adds/plato/.caesar-content-path`. The recovery launcher passes
+it to Caesar if the newer Settings.toml field has been lost.
+
+## Install with recovery
+
+1. Preserve a verified backup of the working application, Settings.toml, library
+   metadata and reading states. Before system-partition changes, image the whole
+   internal card while unmounted; a USB file copy is not a full-card image.
+2. Retain the original working Plato ELF as `.adds/plato/plato-stock`. Place the
+   checked ARM Caesar ELF at `.adds/plato/plato-caesar`, alongside the matching
+   resources and libraries. Keep the existing Settings.toml and custom fonts.
+3. Install [recovery-launcher.sh](../contrib/recovery-launcher.sh) as
+   `.adds/plato/plato`, retaining the compatible outer `plato.sh` launch path.
+4. With neither `.caesar-enabled` nor `.caesar-trial` present, verify that the
+   wrapper boots stock Plato and records this in `.caesar-recovery.log`.
+5. Create `.caesar-trial` for a one-time hardware test. After it passes, create
+   `.caesar-enabled` to keep Caesar selected across normal restarts.
+6. Safely eject, restart, and check the application, book order and USB access.
+   The log should show Caesar startup and `info.log` should include
+   `Caesar startup complete.`. See [RECOVERY.md](RECOVERY.md).
+
+The launcher falls back to stock after a failed process or a startup left
+incomplete across a forced restart. USB auto-sharing still requires a running
+reader app; it cannot rescue a failure before startup on its own. If USB is
+unavailable, Clara HD's internal microSD can be accessed through a card reader.
+
+An ordinary app update must not format, repartition, flash an unrelated full-card
+image, or overwrite device-specific boot data. Do not replace the system startup
+script or install a generic KoboRoot.tgz blindly. Keep personal books, notes,
+settings, logs, databases and backup images out of the source repository.

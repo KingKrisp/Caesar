@@ -17,6 +17,7 @@ use super::{Align, Bus, EntryId, Event, Hub, Id, ID_FEEDER, RenderData, RenderQu
 use super::button::Button;
 use super::common::{locate, toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
 use super::keyboard::Keyboard;
+use super::file_actions::FileActions;
 use super::label::Label;
 use super::notification::Notification;
 use super::top_bar::TopBar;
@@ -107,10 +108,10 @@ impl Notes {
             rect![rect.min.x, rect.min.y, rect.max.x, rect.min.y + bar],
             Event::Back, "Notes".to_string(), context)));
         if self.document.is_some() {
-            let width = rect.width() as i32 / 5;
+            let width = rect.width() as i32 / 6;
             for (i, (label, action)) in [("Heading", EntryId::NoteHeading), ("Bold", EntryId::NoteBold),
                                         ("Italic", EntryId::NoteItalic), ("Preview", EntryId::NotePreview),
-                                        ("Save", EntryId::Save)].into_iter().enumerate() {
+                                        ("Save", EntryId::Save), ("File", EntryId::NoteFile(usize::MAX))].into_iter().enumerate() {
                 self.button(rect![rect.min.x + i as i32 * width + gap, rect.min.y + bar + gap,
                                   rect.min.x + (i as i32 + 1) * width - gap, rect.min.y + 2 * bar - gap],
                             Event::Select(action), label, false);
@@ -146,11 +147,18 @@ impl Notes {
                 self.folder.display().to_string(), Align::Center)));
             let start = self.page * self.per_page();
             let entries: Vec<_> = self.notes.iter().skip(start).take(self.per_page())
-                .map(|note| note.title.clone()).collect();
+                .map(|note| {
+                    let stem = note.path.file_stem().unwrap_or_default().to_string_lossy();
+                    let generated = stem.strip_prefix("note-").map_or(false, |stamp|
+                        stamp.len() >= 15 && stamp.chars().all(|c| c.is_ascii_digit() || c == '_'));
+                    if generated { note.title.clone() } else { stem.into_owned() }
+                }).collect();
             for (row, title) in entries.into_iter().enumerate() {
                 let y = rect.min.y + 3 * bar + row as i32 * bar;
-                self.button(rect![rect.min.x + gap, y + gap, rect.max.x - gap, y + bar - gap],
+                self.button(rect![rect.min.x + gap, y + gap, rect.max.x - third / 2 - gap, y + bar - gap],
                             Event::Select(EntryId::NoteOpen(start + row)), &title, false);
+                self.button(rect![rect.max.x - third / 2 + gap, y + gap, rect.max.x - gap, y + bar - gap],
+                            Event::Select(EntryId::NoteFile(start + row)), "File", false);
             }
             if self.notes.is_empty() {
                 self.children.push(Box::new(Label::new(
@@ -188,6 +196,27 @@ impl Notes {
 impl View for Notes {
     fn handle_event(&mut self, event: &Event, hub: &Hub, _bus: &mut Bus, rq: &mut RenderQueue, context: &mut Context) -> bool {
         match *event {
+            Event::Select(EntryId::NoteFile(index)) => {
+                if self.document.is_some() && !self.save(hub,rq,context) { return true; }
+                let path = if self.document.is_some() { self.document.as_ref().and_then(|n|n.path.clone()) }
+                    else { self.notes.get(index).map(|n|n.path.clone()) };
+                if let Some(path) = path {
+                    self.children.push(Box::new(FileActions::new(self.rect,path,self.folder.clone(),rq,context)));
+                } else {
+                    self.children.push(Box::new(Notification::new("Write and save the note first.".into(),hub,rq,context)));
+                }true
+            },
+            Event::Close(ViewId::FileActions) => {
+                let buffer=self.editor().map(|e|e.buffer.clone());self.rebuild(buffer,rq,context);true
+            },
+            Event::FileChanged(ref old, ref new_path) => {
+                if self.document.as_ref().and_then(|n|n.path.as_ref()) == Some(old) {
+                    if let Some(new_path) = new_path { self.document.as_mut().unwrap().path=Some(new_path.clone()); }
+                    else { self.document=None; }
+                }
+                let buffer=if self.document.is_some() {self.editor().map(|e|e.buffer.clone())}else{None};
+                self.reload();self.rebuild(buffer,rq,context);true
+            },
             Event::Select(EntryId::NoteNew) if self.document.is_none() => {
                 self.document = Some(NoteFile::default());
                 self.rebuild(Some(Buffer::default()), rq, context);

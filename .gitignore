@@ -19,3 +19,7 @@
 /plato-*.zip
 /thirdparty/*/*
 !/thirdparty/*/*kobo*
+
+# Local platform and Python artifacts
+.DS_Store
+__pycache__/

@@ -1,0 +1,11 @@
+# Use this entry in Settings.toml to keep only Books in the book browser.
+# Keep the original library root so reading states, Gallery and Notes stay put.
+[[libraries]]
+name = "On Board"
+path = "/mnt/onboard"
+content-path = "Books"
+mode = "database"
+sort-method = "series"
+first-column = "title-and-author"
+second-column = "progress"
+thumbnail-previews = false

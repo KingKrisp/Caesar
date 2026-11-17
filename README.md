@@ -6,6 +6,8 @@ an on-device Settings app, and configurable reading gestures.
 
 Moving from development to a Kobo: [local installation handoff](doc/INSTALL_HANDOFF.md).
 
+Recovery and persistent startup: [RECOVERY](doc/RECOVERY.md).
+
 Documentation: [GUIDE](doc/GUIDE.md), [MANUAL](doc/MANUAL.md) and [BUILD](doc/BUILD.md).
 
 ## Supported firmwares

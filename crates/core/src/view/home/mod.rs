@@ -1130,7 +1130,7 @@ impl Home {
 
     fn copy_to(&mut self, path: &Path, index: usize, context: &mut Context) -> Result<(), Error> {
         let library_settings = &context.settings.libraries[index];
-        let mut library = Library::new(&library_settings.path, library_settings.mode)?;
+        let mut library = Library::from_settings(library_settings)?;
         context.library.copy_to(path, &mut library)?;
         library.flush();
         Ok(())
@@ -1138,7 +1138,7 @@ impl Home {
 
     fn move_to(&mut self, path: &Path, index: usize, hub: &Hub, rq: &mut RenderQueue, context: &mut Context) -> Result<(), Error> {
         let library_settings = &context.settings.libraries[index];
-        let mut library = Library::new(&library_settings.path, library_settings.mode)?;
+        let mut library = Library::from_settings(library_settings)?;
         context.library.move_to(path, &mut library)?;
         library.flush();
         self.refresh_visibles(true, false, hub, rq, context);
@@ -1184,8 +1184,7 @@ impl Home {
         }
 
         let library_settings = context.settings.libraries[index].clone();
-        let library = Library::new(&library_settings.path,
-                                    library_settings.mode)
+        let library = Library::from_settings(&library_settings)
                               .map_err(|e| eprintln!("Can't load library: {:#}.", e));
 
         if library.is_err() {

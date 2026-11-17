@@ -144,6 +144,8 @@ pub struct LibrarySettings {
     pub name: String,
     pub path: PathBuf,
     pub mode: LibraryMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_path: Option<PathBuf>,
     pub sort_method: SortMethod,
     pub first_column: FirstColumn,
     pub second_column: SecondColumn,
@@ -159,6 +161,7 @@ impl Default for LibrarySettings {
             path: env::current_dir().ok()
                       .unwrap_or_else(|| PathBuf::from("/")),
             mode: LibraryMode::Database,
+            content_path: None,
             sort_method: SortMethod::Opened,
             first_column: FirstColumn::TitleAndAuthor,
             second_column: SecondColumn::Progress,

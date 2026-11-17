@@ -18,7 +18,7 @@ use super::top_bar::TopBar;
 use super::common::{toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
 
 const SECTIONS: &[&str] = &["Display and light", "Sleep, clock and USB", "Reading defaults", "Library",
-                           "Reader bindings", "Global shortcuts", "Device and storage"];
+                           "Reading gestures", "Global shortcuts", "Device and storage"];
 
 pub struct Preferences {
     id: Id,
@@ -104,16 +104,13 @@ impl Preferences {
         if let Some(preference) = self.choice {
             let current = preference.current(&context.settings);
             return self.options(preference, context).into_iter().enumerate().map(|(index, (mut text, value))| {
-                if value == Value::Number(0.0) && matches!(preference, Preference::Sleep | Preference::PowerOff | Preference::Refresh | Preference::RefreshInverted) {
-                    text = "Never".to_string();
-                }
+                if matches!(value, Value::Number(_)) { text = preference.value_label(&value); }
                 (format!("{}{}", if value == current { "✓ " } else { "" }, text), Some(Event::Select(EntryId::SettingsApply(index))))
             }).collect();
         }
         if self.section == Some(6) {
             let mut info = vec![format!("Caesar {}", env!("CARGO_PKG_VERSION")),
                 format!("Device: Kobo {}", CURRENT_DEVICE.model),
-                "Network: offline only; no enable controls".to_string(),
                 format!("Notes: {}", context.library.home.join(&context.settings.notes_path).display()),
                 format!("Screenshots: {}", context.library.home.join(&context.settings.screenshot_path).display()),
                 format!("Sketches: {}", context.library.home.join(&context.settings.sketch.save_path).display())];
@@ -130,12 +127,19 @@ impl Preferences {
         self.items().into_iter().enumerate().map(|(index, preference)| {
             let current = preference.current(&context.settings);
             let value = self.options(preference, context).into_iter().find(|(_, value)| *value == current)
-                .map_or_else(|| current.label(), |(label, _)| label);
+                .map_or_else(|| preference.value_label(&current), |(label, value)| {
+                    if matches!(value, Value::Number(_)) { preference.value_label(&value) } else { label }
+                });
             (format!("{}: {}", preference.label(), value), Some(Event::Select(EntryId::SettingsChoose(index))))
         }).collect()
     }
 
-    fn per_page(&self) -> usize { (self.rect.height() as i32 / self.bar() - 3).max(1) as usize }
+    fn header_rows(&self) -> i32 {
+        if let Some(preference) = self.choice { 1 + preference.help().len() as i32 }
+        else if matches!(self.section, Some(2) | Some(4) | Some(5)) { 2 }
+        else { 1 }
+    }
+    fn per_page(&self) -> usize { (self.rect.height() as i32 / self.bar() - self.header_rows() - 1).max(1) as usize }
     fn bar(&self) -> i32 { scale_by_dpi(SMALL_BAR_HEIGHT, CURRENT_DEVICE.dpi) as i32 }
 
     fn rebuild(&mut self, rq: &mut RenderQueue, context: &mut Context) {
@@ -146,18 +150,21 @@ impl Preferences {
         let title = self.choice.map(|p| p.label()).unwrap_or_else(|| self.section.map_or("Settings", |s| SECTIONS[s as usize]));
         self.children.push(Box::new(TopBar::new(rect![rect.min.x, rect.min.y, rect.max.x, rect.min.y + bar],
             Event::Back, title.to_string(), context)));
-        let subtitle = match self.section {
-            Some(2) => "Defaults for newly opened books; saved book settings take priority.",
-            Some(4) | Some(5) => "Two-finger tap in the center always reopens Settings.",
-            _ => "Offline only · changes save immediately",
-        };
-        self.children.push(Box::new(Label::new(rect![rect.min.x, rect.min.y + bar, rect.max.x, rect.min.y + 2 * bar],
-            subtitle.to_string(), Align::Center)));
+        let descriptions: &[&str] = if let Some(preference) = self.choice { preference.help() }
+            else { match self.section {
+                Some(2) => &["New book defaults; saved book settings take priority."],
+                Some(4) | Some(5) => &["Two-finger center tap always opens Settings."],
+                _ => &[],
+            }};
+        for (line, text) in descriptions.iter().enumerate() {
+            let y = rect.min.y + (line as i32 + 1) * bar;
+            self.children.push(Box::new(Label::new(rect![rect.min.x,y,rect.max.x,y+bar],(*text).into(),Align::Center)));
+        }
         let rows = self.rows(context);
         let pages = (rows.len() + self.per_page() - 1) / self.per_page();
         self.page = self.page.min(pages.saturating_sub(1));
         for (i, (text, event)) in rows.into_iter().skip(self.page * self.per_page()).take(self.per_page()).enumerate() {
-            let y = rect.min.y + (i as i32 + 2) * bar;
+            let y = rect.min.y + (i as i32 + self.header_rows()) * bar;
             let row = rect![rect.min.x + gap, y + gap, rect.max.x - gap, y + bar - gap];
             self.children.push(match event {
                 Some(event) => Box::new(Button::new(row, event, text)) as Box<dyn View>,

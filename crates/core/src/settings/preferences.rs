@@ -23,17 +23,78 @@ impl Preference {
         use Preference::*;
         match self {
             Frontlight => "Frontlight", Brightness => "Brightness", Warmth => "Warmth", Inverted => "Dark mode",
-            Rotation => "Screen orientation", SleepCover => "Sleep cover", Sleep => "Sleep after (minutes)",
-            PowerOff => "Power off after sleep (days)", AutoShare => "Automatic USB sharing",
+            Rotation => "Screen orientation", SleepCover => "Sleep when cover closes", Sleep => "Sleep after inactivity",
+            PowerOff => "Power off while asleep", AutoShare => "Connect USB automatically",
             TimeFormat => "Clock format", DateFormat => "Date format", Keyboard => "Keyboard layout",
-            FontFamily => "Default reading font", FontSize => "Default font size (pt)", Margin => "Default margins (mm)",
-            LineHeight => "Default line spacing", Alignment => "Default text alignment", IgnoreCss => "Ignore book styles",
-            Continuous => "Continuous fit-to-width", Refresh => "Full refresh every N turns", RefreshInverted => "Dark-mode refresh every N turns",
-            Thumbnails => "Book thumbnails", FirstColumn => "Library first column", SecondColumn => "Library second column",
-            StartupImport => "Import books at startup", UsbImport => "Import after USB sharing", AddressBar => "Library address bar",
-            NavigationBar => "Library navigation bar", StripWidth => "Edge-zone size (half-screen ratio)",
-            CornerWidth => "Corner-zone size (half-screen ratio)", Bind(binding) => binding.label(), ResetBindings => "Restore default bindings",
+            FontFamily => "Reading font", FontSize => "Font size", Margin => "Side margins",
+            LineHeight => "Line spacing", Alignment => "Text alignment", IgnoreCss => "Override book styles",
+            Continuous => "Continuous PDF paging", Refresh => "Screen refresh", RefreshInverted => "Dark mode screen refresh",
+            Thumbnails => "Book thumbnails", FirstColumn => "Book labels", SecondColumn => "Book details",
+            StartupImport => "Scan for books at startup", UsbImport => "Scan after USB disconnects", AddressBar => "Folder path bar",
+            NavigationBar => "Folder navigation", StripWidth => "Edge touch area",
+            CornerWidth => "Corner touch area", Bind(binding) => binding.label(), ResetBindings => "Reset gestures and shortcuts",
         }
+    }
+
+    pub fn help(self) -> &'static [&'static str] {
+        use Preference::*;
+        match self {
+            Frontlight => &["Turn the screen's built-in light on or off."],
+            Brightness => &["Adjust how brightly the screen is lit."],
+            Warmth => &["Higher values give the light a warmer, amber tone."],
+            Inverted => &["Use light text on a dark background."],
+            Rotation => &["Choose portrait or landscape screen orientation."],
+            SleepCover => &["Closing a compatible magnetic cover puts the reader to sleep."],
+            Sleep => &["Put the reader to sleep after this long without input."],
+            PowerOff => &["Turn off after sleeping for this long.", "Turning it back on requires a full startup."],
+            AutoShare => &["Share storage with a connected computer without a prompt.", "The reading app must be running to detect USB."],
+            TimeFormat => &["Choose how the time appears in the top bar."],
+            DateFormat => &["Choose how dates appear on the reader."],
+            Keyboard => &["Choose the on-screen keyboard layout."],
+            FontFamily => &["Font used for books without saved reading settings."],
+            FontSize => &["Text size in points for books without saved settings."],
+            Margin => &["Space at each side of the page, in millimetres."],
+            LineHeight => &["Space between lines, relative to the text size."],
+            Alignment => &["Justified text lines up with both page edges."],
+            IgnoreCss => &["Use the reader's formatting instead of the book's styles."],
+            Continuous => &["For PDFs and other fixed-layout documents fitted to width.", "Continue down the page before moving to the next page."],
+            Refresh | RefreshInverted => &["A full refresh briefly flashes to clear faded text.", "More often reduces ghosting; less often flashes less."],
+            Thumbnails => &["Show cover previews alongside books in the library."],
+            FirstColumn => &["Choose the main label shown for each book."],
+            SecondColumn => &["Show reading progress or publication year beside each book."],
+            StartupImport => &["Look for added or removed books when the app starts."],
+            UsbImport => &["Update the library after you finish transferring files."],
+            AddressBar => &["Show the current folder path in the library."],
+            NavigationBar => &["Show folders for browsing your library."],
+            StripWidth => &["Width of the touch areas along the screen edges.", "Measured as a share of the screen's shorter side."],
+            CornerWidth => &["Size of the triangular touch areas in the corners.", "Measured as a share of the screen's shorter side."],
+            Bind(binding) if binding.is_global() => &["Choose the shortcut's action throughout the app."],
+            Bind(_) => &["Choose what this gesture or button does while reading."],
+            ResetBindings => &["Restore the original reading and global shortcut actions."],
+        }
+    }
+
+    pub fn value_label(self, value: &Value) -> String {
+        use Preference::*;
+        let number = |v: f32| { let s = format!("{:.1}", v); s.strip_suffix(".0").unwrap_or(&s).to_string() };
+        if let Value::Number(v) = value {
+            let n = number(*v);
+            return match self {
+                Brightness | Warmth => format!("{}%", n),
+                Sleep if *v == 0. => "Never".into(),
+                Sleep => format!("{} {}", n, if *v == 1. { "minute" } else { "minutes" }),
+                PowerOff if *v == 0. => "Never".into(),
+                PowerOff => format!("{} {}", n, if *v == 1. { "day" } else { "days" }),
+                Refresh | RefreshInverted if *v == 0. => "No periodic refresh".into(),
+                Refresh | RefreshInverted if *v == 1. => "Every page turn".into(),
+                Refresh | RefreshInverted => format!("Every {} page turns", n),
+                FontSize => format!("{} pt", n), Margin => format!("{} mm", n),
+                LineHeight => format!("{}×", n),
+                StripWidth | CornerWidth => format!("{}%", number(*v * 50.)),
+                _ => n,
+            };
+        }
+        value.label()
     }
 
     pub fn current(self, s: &Settings) -> Value {
@@ -42,7 +103,8 @@ impl Preference {
             Frontlight => Value::Bool(s.frontlight), Brightness => Value::Number(s.frontlight_levels.intensity),
             Warmth => Value::Number(s.frontlight_levels.warmth), Inverted => Value::Bool(s.inverted),
             Rotation => Value::Text(match s.rotation_lock { Some(RotationLock::Portrait) => "Portrait",
-                Some(RotationLock::Landscape) => "Landscape", _ => "Automatic" }.to_string()),
+                Some(RotationLock::Landscape) => "Landscape",
+                _ if crate::device::CURRENT_DEVICE.has_gyroscope() => "Automatic", _ => "Portrait" }.to_string()),
             SleepCover => Value::Bool(s.sleep_cover), Sleep => Value::Number(s.auto_suspend), PowerOff => Value::Number(s.auto_power_off),
             AutoShare => Value::Bool(s.auto_share), TimeFormat => Value::Text(s.time_format.clone()), DateFormat => Value::Text(s.date_format.clone()),
             Keyboard => Value::Text(s.keyboard_layout.clone()), FontFamily => Value::Text(s.reader.font_family.clone()),
@@ -143,6 +205,17 @@ pub fn save(settings: &Settings, path: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preference_values_show_units_and_refresh_meaning() {
+        assert_eq!(Preference::Refresh.value_label(&Value::Number(10.)), "Every 10 page turns");
+        assert_eq!(Preference::Refresh.value_label(&Value::Number(0.)), "No periodic refresh");
+        assert_eq!(Preference::Sleep.value_label(&Value::Number(0.)), "Never");
+        assert_eq!(Preference::PowerOff.value_label(&Value::Number(1.5)), "1.5 days");
+        assert_eq!(Preference::Brightness.value_label(&Value::Number(10.)), "10%");
+        assert_eq!(Preference::StripWidth.value_label(&Value::Number(0.6)), "30%");
+        assert_eq!(Preference::Margin.value_label(&Value::Number(8.)), "8 mm");
+    }
 
     #[test]
     fn legacy_network_preferences_and_fetcher_hooks_cannot_enable_online_features() {

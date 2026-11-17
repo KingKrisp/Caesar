@@ -70,7 +70,7 @@ impl Context {
             if index == selected_library {
                 continue;
             }
-            if let Ok(mut library) = Library::new(&library_settings.path, library_settings.mode)
+            if let Ok(mut library) = Library::from_settings(library_settings)
                                              .map_err(|e| eprintln!("{:#?}", e)) {
                 library.import(&self.settings.import);
                 library.flush();

@@ -31,3 +31,28 @@ You can make a backup of a library with:
 ```sh
 rsync -vurt --delete EREADER_LIBRARY_PATH/ COMPUTER_LIBRARY_PATH/
 ```
+
+## Keep the book list in one folder
+
+A library can keep its existing storage and reading history while limiting the
+book browser and automatic import to a subfolder:
+
+```toml
+[[libraries]]
+name = "On Board"
+path = "/mnt/onboard"
+content-path = "Books"
+mode = "database"
+```
+
+`content-path` is relative to `path`. Both database browsing and filesystem
+browsing/search respect it. Previously indexed entries outside that folder stay
+in the database but are hidden from the book list. Files and reading states are
+not moved or deleted. Gallery and Notes continue to use the library's original
+root. Without `content-path`, the library behaves as before.
+
+For installations that can recover into an older Plato build, put `Books` on
+one line in `.caesar-content-path` in the application directory. The recovery
+launcher exports this as `CAESAR_CONTENT_PATH`. Caesar uses it for the selected
+library when `content-path` is absent. This retains the folder choice if the
+older reader rewrites Settings.toml without recognizing the new field.

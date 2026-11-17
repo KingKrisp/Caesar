@@ -11,7 +11,7 @@ use chrono::{Local, DateTime};
 use anyhow::{Error, bail, format_err};
 use crate::metadata::{Info, ReaderInfo, FileInfo, BookQuery, SimpleStatus, SortMethod};
 use crate::metadata::{sort, sorter, extract_metadata_from_document};
-use crate::settings::{LibraryMode, ImportSettings};
+use crate::settings::{LibraryMode, LibrarySettings, ImportSettings};
 use crate::document::file_kind;
 use crate::helpers::{Fingerprint, Fp, save_json, load_json, IsHidden};
 
@@ -23,6 +23,7 @@ pub const THUMBNAIL_PREVIEWS_DIRNAME: &str = ".thumbnail-previews";
 pub struct Library {
     pub home: PathBuf,
     pub mode: LibraryMode,
+    content_path: Option<PathBuf>,
     pub db: IndexMap<Fp, Info, FxBuildHasher>,
     pub paths: FxHashMap<PathBuf, Fp>,
     pub reading_states: FxHashMap<Fp, ReaderInfo>,
@@ -34,7 +35,25 @@ pub struct Library {
     pub show_hidden: bool,
 }
 
+// Only the book browser and importer are scoped; storage and reading-state
+// paths remain relative to the original library home.
+fn in_content_path(scope: Option<&Path>, relative: &Path, directory: bool) -> bool {
+    scope.map_or(true, |scope| relative.starts_with(scope) || (directory && scope.starts_with(relative)))
+}
+
 impl Library {
+    pub fn from_settings(settings: &LibrarySettings) -> Result<Self, Error> {
+        if let Some(path) = &settings.content_path {
+            if path.as_os_str().is_empty() || path.components().any(|c|
+                !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir)) {
+                bail!("Library content-path must be a relative folder inside the library.");
+            }
+        }
+        let mut library = Self::new(&settings.path, settings.mode)?;
+        library.content_path = settings.content_path.clone();
+        Ok(library)
+    }
+
     pub fn new<P: AsRef<Path>>(home: P, mode: LibraryMode) -> Result<Self, Error> {
         if let Err(e) = fs::create_dir(&home) {
             if e.kind() != ErrorKind::AlreadyExists {
@@ -111,6 +130,7 @@ impl Library {
         Ok(Library {
             home: home.as_ref().to_path_buf(),
             mode,
+            content_path: None,
             db,
             paths,
             reading_states,
@@ -132,6 +152,7 @@ impl Library {
                 let relat_prefix = prefix.as_ref().strip_prefix(&self.home)
                                          .unwrap_or_else(|_| prefix.as_ref());
                 for (_, info) in self.db.iter() {
+                    if !in_content_path(self.content_path.as_deref(), &info.file.path, false) { continue; }
                     if let Ok(relat) = info.file.path.strip_prefix(relat_prefix) {
                         let mut compos = relat.components();
                         let mut first = compos.next();
@@ -166,7 +187,9 @@ impl Library {
                                      .min_depth(1)
                                      .max_depth(max_depth)
                                      .into_iter()
-                                     .filter_entry(|e| self.show_hidden || !e.is_hidden()) {
+                                     .filter_entry(|e| (self.show_hidden || !e.is_hidden()) &&
+                                         in_content_path(self.content_path.as_deref(),
+                                             e.path().strip_prefix(&self.home).unwrap_or(e.path()), e.file_type().is_dir())) {
                     if entry.is_err() {
                         continue;
                     }
@@ -221,8 +244,11 @@ impl Library {
             return;
         }
 
-        for entry in WalkDir::new(&self.home).min_depth(1).into_iter()
-                             .filter_entry(|e| !e.is_hidden()) {
+        let home = self.home.clone();
+        let scope = self.content_path.clone();
+        for entry in WalkDir::new(&home).min_depth(1).into_iter()
+                             .filter_entry(|e| !e.is_hidden() && in_content_path(scope.as_deref(),
+                                 e.path().strip_prefix(&home).unwrap_or(e.path()), e.file_type().is_dir())) {
             if entry.is_err() {
                 continue;
             }
@@ -845,5 +871,66 @@ impl Library {
         self.home
             .join(THUMBNAIL_PREVIEWS_DIRNAME)
             .join(format!("{}.png", fp))
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    struct Temp(PathBuf);
+    impl Temp {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("caesar-library-{}-{}", std::process::id(),
+                Local::now().timestamp_nanos_opt().unwrap()));
+            fs::create_dir_all(&root).unwrap(); Self(root)
+        }
+    }
+    impl Drop for Temp { fn drop(&mut self) { fs::remove_dir_all(&self.0).ok(); } }
+    fn settings(root: &Path, mode: LibraryMode) -> LibrarySettings {
+        LibrarySettings { path: root.into(), content_path: Some("Books".into()), mode, ..Default::default() }
+    }
+    #[test]
+    fn scoped_database_hides_captures_and_keeps_series_numeric_without_moving_history() {
+        let root = Temp::new();
+        let mut library = Library::from_settings(&settings(&root.0, LibraryMode::Database)).unwrap();
+        for (i, number) in ["1.0","10.0","11.0","12.0","13.0","2.0","3.0","4.0","5.0","6.0","7.0","8.0","9.0"].iter().enumerate() {
+            let fp = Fp::from_str(&format!("{:016X}",i+1)).unwrap();
+            let info = Info { series: "A Series of Unfortunate Events".into(), number: (*number).into(),
+                file: FileInfo { path: format!("Books/nested/{}.epub",number).into(), kind:"epub".into(), size:1 }, ..Default::default() };
+            library.db.insert(fp,info);
+        }
+        library.db.insert(Fp::from_str("FFFFFFFFFFFFFFFF").unwrap(),Info {
+            file:FileInfo{path:"Sketches/sketch.png".into(),kind:"png".into(),size:1},..Default::default()});
+        let history = root.0.join(READING_STATES_DIRNAME).join("preserved");
+        fs::write(&history,b"keep history in place").unwrap();
+        library.sort(SortMethod::Series,false);
+        let (books,dirs) = library.list(&root.0,None,false);
+        assert_eq!(books.iter().map(|b|b.number.parse::<f64>().unwrap()).collect::<Vec<_>>(),(1..=13).map(f64::from).collect::<Vec<_>>());
+        assert_eq!(dirs,BTreeSet::from([root.0.join("Books")]));
+        assert_eq!(library.db.len(),14,"filtering must not erase other indexed files");
+        assert_eq!(fs::read(&history).unwrap(),b"keep history in place");
+        assert_eq!(library.home,root.0);
+    }
+    #[test]
+    fn scope_applies_to_import_and_filesystem_search_and_cannot_escape_home() {
+        let root=Temp::new();
+        for (i,name) in ["Books/inside.epub","Books/nested/second.epub","Sketches/sketch.png","Screenshots/capture.png","Notes/note.md","Bookshelf/outside.epub"].iter().enumerate() {
+            let path=root.0.join(name);fs::create_dir_all(path.parent().unwrap()).unwrap();fs::write(path,vec![b'x';i+1]).unwrap();
+        }
+        let mut library=Library::from_settings(&settings(&root.0,LibraryMode::Database)).unwrap();
+        let import=ImportSettings{metadata_kinds:Default::default(),allowed_kinds:["epub","png","md"].into_iter().map(String::from).collect(),..Default::default()};
+        library.import(&import);
+        assert_eq!(library.db.len(),2);
+        assert!(library.db.values().all(|b|b.file.path.starts_with("Books")));
+        let fs_library=Library::from_settings(&settings(&root.0,LibraryMode::Filesystem)).unwrap();
+        let (_,dirs)=fs_library.list(&root.0,None,false);
+        assert_eq!(dirs,BTreeSet::from([root.0.join("Books")]));
+        assert!(fs_library.list(root.0.join("Sketches"),None,false).0.is_empty());
+        assert_eq!(fs_library.list(&root.0,Some(&BookQuery::default()),false).0.len(),2);
+        for invalid in ["../Books","/Books"] {
+            let mut config=settings(&root.0,LibraryMode::Database);config.content_path=Some(invalid.into());
+            assert!(Library::from_settings(&config).is_err());
+        }
+        assert!(root.0.join("Sketches/sketch.png").exists());
     }
 }

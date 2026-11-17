@@ -3166,7 +3166,7 @@ impl View for Reader {
                             hub.send(Event::GoTo(location)).ok();
                         } else {
                             if link.text.starts_with("https:") || link.text.starts_with("http:") {
-                                let notif = Notification::new("Caesar is offline. External links are disabled.".to_string(), hub, rq, context);
+                                let notif = Notification::new("External links are not supported.".to_string(), hub, rq, context);
                                 self.children.push(Box::new(notif) as Box<dyn View>);
                             } else {
                                 eprintln!("Can't resolve URI: {}.", link.text);

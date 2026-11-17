@@ -92,6 +92,8 @@ impl InputField {
         }
     }
 
+    pub fn focused(mut self) -> Self { self.focused = true; self }
+
     pub fn border(mut self, border: bool) -> InputField {
         self.border = border;
         self
@@ -119,6 +121,8 @@ impl InputField {
             rq.add(RenderData::new(self.id, self.rect, UpdateMode::Gui));
         }
     }
+
+    pub fn value(&self) -> &str { &self.text }
 
     pub fn text_before_cursor(&self) -> &str {
         &self.text[..self.cursor]

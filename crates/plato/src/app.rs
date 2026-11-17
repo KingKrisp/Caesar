@@ -108,8 +108,13 @@ fn build_context(fb: Box<dyn Framebuffer>) -> Result<Context, Error> {
         settings.selected_library = 0;
     }
 
+    // The launcher's optional folder override survives a recovery boot into an
+    // older Plato, which does not preserve this newer Settings.toml field.
+    if settings.libraries[settings.selected_library].content_path.is_none() {
+        settings.libraries[settings.selected_library].content_path = env::var_os("CAESAR_CONTENT_PATH").map(std::path::PathBuf::from);
+    }
     let library_settings = &settings.libraries[settings.selected_library];
-    let library = Library::new(&library_settings.path, library_settings.mode)?;
+    let library = Library::from_settings(library_settings)?;
 
     let fonts = Fonts::load().context("can't load fonts")?;
 
@@ -328,6 +333,7 @@ pub fn run() -> Result<(), Error> {
         _ => (),
     }
 
+    let mut startup_marker = env::var_os("CAESAR_STARTUP_MARKER").map(std::path::PathBuf::from);
     while let Ok(evt) = rx.recv() {
         match evt {
             Event::Device(de) => {
@@ -936,6 +942,15 @@ pub fn run() -> Result<(), Error> {
         }
 
         process_render_queue(view.as_ref(), &mut rq, &mut context, &mut updating);
+        if let Some(marker) = startup_marker.take() {
+            match std::fs::remove_file(marker) {
+                Ok(()) => {
+                    if let Ok(directory) = File::open(&current_dir) { directory.sync_all().ok(); }
+                    eprintln!("Caesar startup complete.");
+                },
+                Err(error) => eprintln!("Couldn't clear startup recovery marker: {}", error),
+            }
+        }
 
         while let Some(ce) = bus.pop_front() {
             tx.send(ce).ok();

@@ -20,6 +20,7 @@ pub mod font;
 pub mod context;
 pub mod captures;
 pub mod notes;
+pub mod file_ops;
 pub mod gesture;
 
 pub use anyhow;
