@@ -176,6 +176,94 @@ Applications can be launched from the *Applications* submenu of the main menu.
 
 You can go back to the previous view by tapping the top-left *back arrow*.
 
+## Settings
+
+Open *Settings* directly from the main menu or from *Applications*. Settings save
+immediately. Back returns from a choice to its section, then to the Settings home,
+then to the previous application. Use Previous/Next or horizontal swipes for lists
+with multiple pages.
+
+The app includes display and frontlight controls, warmth on supported devices,
+orientation, refresh intervals, sleep and power-off timers, sleep cover, USB
+sharing, clock/date formats, keyboard layout, reading defaults, library display
+and import settings, and device/storage information. It does not implement Kobo
+accounts, store/sync, firmware updates, or factory reset. Reading defaults apply
+when opening a book; that book's saved settings still take priority.
+
+*Reader bindings* configures all nine tap regions, swipes, diagonal and two-finger
+gestures, holds, arrows/corners, pinches/spreads, rotation, cross/diamond gestures,
+and page buttons. Choose *Default* to preserve Plato's existing context-sensitive
+behavior, *Disabled* to consume the input without an action, or another action.
+Choices include page/chapter navigation, bookmarks, annotations, contents, search,
+reading controls, display toggles, screenshots, and launching Caesar apps. Existing
+zoom/selection behavior is preserved for Default bindings. Keyboard keys, visible
+buttons/menus, selection adjustment, and the power button retain their normal
+behavior. These are reading bindings, not replacements for each app's own controls.
+
+*Global shortcuts* remaps or disables the diagonal two-finger refresh/screenshot
+shortcuts and the light button, if the device has one. **A two-finger tap near the
+center of the screen always opens Settings**, independently of the zone sizes.
+This recovery shortcut cannot be disabled. Restore default bindings clears all
+overrides. Overrides are stored by name in the `[controls]` table of `Settings.toml`.
+
+Caesar has no Wi-Fi enable option. Old Wi-Fi settings and fetcher hooks are ignored;
+external web links are disabled. The device launcher requests radio shutdown at
+startup, and the application repeats it on resume, after USB settings reload,
+and if it receives a network-up event. No online article fetcher is distributed.
+The launcher powers off on exit instead of starting Kobo's stock interface.
+This is a Caesar software policy; verifying a permanent device-wide offline setup
+also requires inspecting the installed boot script and testing the actual hardware.
+
+## Gallery
+
+Open *Applications → Gallery* to browse screenshots and saved sketches. Choose
+*Screenshots* or *Sketches*, then tap a filename to view the image fitted to the
+screen. *Previous* and *Next* (or horizontal swipes and page-turn buttons) move
+between list pages or images. The back arrow returns from an image to its list,
+and from the list to the previous application. Images are shown newest first.
+Use *Refresh* to pick up files saved while the gallery was open.
+
+New screenshots are saved in `Screenshots` inside the active library. Set the
+top-level `screenshot-path` in `Settings.toml` to choose another folder. Sketches
+continue to use `[sketch] save-path`, which defaults to `Sketches` inside the
+active library. An absolute path can be used for either folder to share captures
+across libraries. Folders are created when a capture is saved.
+
+The gallery reads PNG files, including subfolders, without changing the files or
+adding reading progress. It also finds older `screenshot-*.png` files directly in
+the application working directory and active library root; these stay in place.
+Hidden folders and symbolic links are not browsed. A damaged image shows an error
+and can be skipped with *Next* or the back arrow.
+
+## Notes
+
+Open *Applications → Notes* to see saved notes, newest first. Tap *+ New Note* to
+start writing, or tap a note to edit it. The first nonempty line supplies the title
+in the list; a heading such as `# Shopping list` works well.
+
+The editor uses the on-screen keyboard. Return inserts a new line. Text wraps to
+the screen, tapping the text positions the cursor, and the keyboard arrows and
+delete keys move or remove characters. *Up* and *Down*, swipes, and page-turn
+buttons scroll longer notes. Typing brings the cursor back into view.
+
+Write plain Markdown, or use *Bold* and *Italic* to format the word at the cursor.
+On an empty space these insert paired markers with the cursor between them.
+*Heading* cycles the current line through heading levels 1–3 and plain text.
+*Preview* saves and displays the formatted note; the back arrow returns to editing.
+
+*Save* writes the note without leaving the editor. The back arrow saves and returns
+to the list, and notes also save before sleep. The status label distinguishes saved
+and unsaved changes. Empty new drafts are not created as files. If a normal save
+or return fails, the editor retains the draft and displays an error. Save before
+physically removing the card or power; the in-memory draft is not a crash backup.
+
+Notes are UTF-8 `.md` files in `Notes` inside the active library, outside the book
+database. The folder is created on the first save. Set the top-level `notes-path`
+in `Settings.toml` to change it; an absolute path shares one notes folder across
+libraries. You can copy or edit these Markdown files on a computer. Notes detects
+external file changes before saving, so it won't overwrite a changed file. The
+editor supports files up to 256 KiB and reports larger files without truncating them.
+
 ## Dictionary
 
 *Dictionary* can be launched from the *Reader* view by tapping and holding a word or by making a text selection and tapping *Define* in the selection menu.

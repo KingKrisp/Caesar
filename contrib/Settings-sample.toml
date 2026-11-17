@@ -2,7 +2,6 @@
 # Possible values: "English", "Russian".
 keyboard-layout = "English"
 frontlight = true
-wifi = false
 # Invert the display's colors.
 inverted = false
 # Handle the Sleep Cover event.
@@ -24,8 +23,6 @@ auto-power-off = 3.0
 # https://docs.rs/chrono/latest/chrono/format/strftime/index.html
 time-format = "%H:%M"
 date-format = "%A, %B %-d, %Y"
-# Appends the tapped external URLs to this file.
-external-urls-queue = "bin/article_fetcher/urls.txt"
 
 # You can create libraries by adding further [[libraries]] entries.
 [[libraries]]
@@ -37,15 +34,6 @@ sort-method = "opened"
 first-column = "title-and-author"
 second-column = "progress"
 thumbnail-previews = true
-
-# This example fetcher retrieves articles through the *Wallabag* protocol.
-# See `doc/ARTICLE_FETCHER.md` on how to configure it.
-[[libraries.hooks]]
-path = "Articles"
-program = "bin/article_fetcher/article_fetcher"
-sort-method = "added"
-first-column = "title-and-author"
-second-column = "progress"
 
 # Remove this entry if you don't have an external card slot
 # on your device.

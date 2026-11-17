@@ -1,6 +1,10 @@
 ![Logo](artworks/plato-logo.svg)
 
-*Plato* is a document reader for *Kobo*'s e-readers.
+*Caesar* is an offline fork of [Plato](https://github.com/baskerville/plato), a
+document reader for *Kobo*'s e-readers. It adds a capture gallery, Markdown notes,
+an on-device Settings app, and configurable reading gestures.
+
+Moving from development to a Kobo: [local installation handoff](doc/INSTALL_HANDOFF.md).
 
 Documentation: [GUIDE](doc/GUIDE.md), [MANUAL](doc/MANUAL.md) and [BUILD](doc/BUILD.md).
 
@@ -46,7 +50,7 @@ Any 4.*X*.*Y* firmware, with *X* ≥ 6, will do.
 - Adjust the contrast.
 - Define words using *dictd* dictionaries.
 - Annotations, highlights and bookmarks.
-- Retrieve articles from online sources through [hooks](doc/HOOKS.md) (an example *wallabag* [article fetcher](doc/ARTICLE_FETCHER.md) is provided).
+- Offline operation: no Wi-Fi enable controls, reconnection, background fetchers, or external-link queuing.
 
 [![Tn01](artworks/thumbnail01.png)](artworks/screenshot01.png) [![Tn02](artworks/thumbnail02.png)](artworks/screenshot02.png) [![Tn03](artworks/thumbnail03.png)](artworks/screenshot03.png) [![Tn04](artworks/thumbnail04.png)](artworks/screenshot04.png)
 

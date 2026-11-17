@@ -1,4 +1,6 @@
 mod preset;
+pub mod controls;
+pub mod preferences;
 
 use std::env;
 use std::ops::Index;
@@ -14,6 +16,8 @@ use crate::device::CURRENT_DEVICE;
 use crate::unit::mm_to_px;
 
 pub use self::preset::{LightPreset, guess_frontlight};
+
+pub const OFFLINE: bool = true;
 
 pub const SETTINGS_PATH: &str = "Settings.toml";
 pub const DEFAULT_FONT_PATH: &str = "/mnt/onboard/fonts";
@@ -99,7 +103,6 @@ pub struct Settings {
     pub selected_library: usize,
     pub keyboard_layout: String,
     pub frontlight: bool,
-    pub wifi: bool,
     pub inverted: bool,
     pub sleep_cover: bool,
     pub auto_share: bool,
@@ -110,8 +113,6 @@ pub struct Settings {
     pub auto_power_off: f32,
     pub time_format: String,
     pub date_format: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub external_urls_queue: Option<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub libraries: Vec<LibrarySettings>,
     pub intermissions: Intermissions,
@@ -122,6 +123,9 @@ pub struct Settings {
     pub import: ImportSettings,
     pub dictionary: DictionarySettings,
     pub sketch: SketchSettings,
+    pub screenshot_path: PathBuf,
+    pub notes_path: PathBuf,
+    pub controls: controls::Controls,
     pub calculator: CalculatorSettings,
     pub battery: BatterySettings,
     pub frontlight_levels: LightLevels,
@@ -144,7 +148,7 @@ pub struct LibrarySettings {
     pub first_column: FirstColumn,
     pub second_column: SecondColumn,
     pub thumbnail_previews: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub hooks: Vec<Hook>,
 }
 
@@ -524,10 +528,8 @@ impl Default for Settings {
                     .. Default::default()
                 },
             ],
-            external_urls_queue: Some(PathBuf::from("bin/article_fetcher/urls.txt")),
             keyboard_layout: "English".to_string(),
             frontlight: true,
-            wifi: false,
             inverted: false,
             sleep_cover: true,
             auto_share: false,
@@ -547,6 +549,9 @@ impl Default for Settings {
             import: ImportSettings::default(),
             dictionary: DictionarySettings::default(),
             sketch: SketchSettings::default(),
+            screenshot_path: PathBuf::from("Screenshots"),
+            notes_path: PathBuf::from("Notes"),
+            controls: controls::Controls::default(),
             calculator: CalculatorSettings::default(),
             battery: BatterySettings::default(),
             frontlight_levels: LightLevels::default(),

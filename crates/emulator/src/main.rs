@@ -29,6 +29,11 @@ use plato_core::view::intermission::Intermission;
 use plato_core::view::dictionary::Dictionary;
 use plato_core::view::calculator::Calculator;
 use plato_core::view::sketch::Sketch;
+use plato_core::view::gallery::Gallery;
+use plato_core::view::notes::Notes;
+use plato_core::view::preferences::Preferences;
+use plato_core::settings::controls::{Action, Binding, multitap_action};
+use plato_core::view::common::system_action;
 use plato_core::view::touch_events::TouchEvents;
 use plato_core::view::rotation_values::RotationValues;
 use plato_core::view::common::{locate, locate_by_id, transfer_notifications, overlapping_rectangle};
@@ -48,7 +53,7 @@ use plato_core::context::Context;
 use plato_core::pt;
 use plato_core::png;
 
-pub const APP_NAME: &str = "Plato";
+pub const APP_NAME: &str = "Caesar";
 const DEFAULT_ROTATION: i8 = 1;
 
 const CLOCK_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
@@ -107,26 +112,34 @@ fn code_from_key(key: Scancode) -> Option<ButtonCode> {
     }
 }
 
-struct FBCanvas(WindowCanvas);
+struct FBCanvas {
+    canvas: WindowCanvas,
+    monochrome: bool,
+    dithered: bool,
+    inverted: bool,
+    rotation: i8,
+}
 
 impl Framebuffer for FBCanvas {
-    fn set_pixel(&mut self, x: u32, y: u32, color: Color) {
+    fn set_pixel(&mut self, x: u32, y: u32, mut color: Color) {
+        if self.inverted { color.invert(); }
         let [red, green, blue] = color.rgb();
-        self.0.set_draw_color(SdlColor::RGB(red, green, blue));
-        self.0.draw_point(SdlPoint::new(x as i32, y as i32)).unwrap();
+        self.canvas.set_draw_color(SdlColor::RGB(red, green, blue));
+        self.canvas.draw_point(SdlPoint::new(x as i32, y as i32)).unwrap();
     }
 
-    fn set_blended_pixel(&mut self, x: u32, y: u32, color: Color, alpha: f32) {
+    fn set_blended_pixel(&mut self, x: u32, y: u32, mut color: Color, alpha: f32) {
+        if self.inverted { color.invert(); }
         let [red, green, blue] = color.rgb();
-        self.0.set_draw_color(SdlColor::RGBA(red, green, blue, (alpha * 255.0) as u8));
-        self.0.draw_point(SdlPoint::new(x as i32, y as i32)).unwrap();
+        self.canvas.set_draw_color(SdlColor::RGBA(red, green, blue, (alpha * 255.0) as u8));
+        self.canvas.draw_point(SdlPoint::new(x as i32, y as i32)).unwrap();
     }
 
     fn invert_region(&mut self, rect: &Rectangle) {
         let width = rect.width();
         let s_rect = Some(SdlRect::new(rect.min.x, rect.min.y,
                                        width, rect.height()));
-        if let Ok(data) = self.0.read_pixels(s_rect, PixelFormatEnum::RGB24) {
+        if let Ok(data) = self.canvas.read_pixels(s_rect, PixelFormatEnum::RGB24) {
             for y in rect.min.y..rect.max.y {
                 let v = (y - rect.min.y) as u32;
                 for x in rect.min.x..rect.max.x {
@@ -136,6 +149,7 @@ impl Framebuffer for FBCanvas {
                     let green = data[(addr+1) as usize];
                     let blue = data[(addr+2) as usize];
                     let mut color = Color::Rgb(red, green, blue);
+                    if self.inverted { color.invert(); }
                     color.invert();
                     self.set_pixel(x as u32, y as u32, color);
                 }
@@ -147,7 +161,7 @@ impl Framebuffer for FBCanvas {
         let width = rect.width();
         let s_rect = Some(SdlRect::new(rect.min.x, rect.min.y,
                                        width, rect.height()));
-        if let Ok(data) = self.0.read_pixels(s_rect, PixelFormatEnum::RGB24) {
+        if let Ok(data) = self.canvas.read_pixels(s_rect, PixelFormatEnum::RGB24) {
             for y in rect.min.y..rect.max.y {
                 let v = (y - rect.min.y) as u32;
                 for x in rect.min.x..rect.max.x {
@@ -157,6 +171,7 @@ impl Framebuffer for FBCanvas {
                     let green = data[(addr+1) as usize];
                     let blue = data[(addr+2) as usize];
                     let mut color = Color::Rgb(red, green, blue);
+                    if self.inverted { color.invert(); }
                     color.shift(drift);
                     self.set_pixel(x as u32, y as u32, color);
                 }
@@ -165,7 +180,7 @@ impl Framebuffer for FBCanvas {
     }
 
     fn update(&mut self, _rect: &Rectangle, _mode: UpdateMode) -> Result<u32, Error> {
-        self.0.present();
+        self.canvas.present();
         Ok(Local::now().timestamp_subsec_millis())
     }
 
@@ -180,13 +195,13 @@ impl Framebuffer for FBCanvas {
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_color(png::ColorType::Rgb);
         let mut writer = encoder.write_header().with_context(|| format!("can't write PNG header for {}", path))?;
-        let data = self.0.read_pixels(self.0.viewport(), PixelFormatEnum::RGB24).unwrap_or_default();
+        let data = self.canvas.read_pixels(self.canvas.viewport(), PixelFormatEnum::RGB24).unwrap_or_default();
         writer.write_image_data(&data).with_context(|| format!("can't write PNG data to {}", path))?;
         Ok(())
     }
 
     fn rotation(&self) -> i8 {
-        DEFAULT_ROTATION
+        self.rotation
     }
 
     fn set_rotation(&mut self, n: i8) -> Result<(u32, u32), Error> {
@@ -194,37 +209,41 @@ impl Framebuffer for FBCanvas {
         if (width < height && n % 2 == 0) || (width > height && n % 2 == 1) {
             mem::swap(&mut width, &mut height);
         }
-        self.0.window_mut().set_size(width, height).ok();
+        self.canvas.window_mut().set_size(width, height).ok();
+        self.rotation = n;
         Ok((width, height))
     }
 
-    fn set_monochrome(&mut self, _enable: bool) {
+    fn set_monochrome(&mut self, enable: bool) {
+        self.monochrome = enable;
     }
 
-    fn set_dithered(&mut self, _enable: bool) {
+    fn set_dithered(&mut self, enable: bool) {
+        self.dithered = enable;
     }
 
-    fn set_inverted(&mut self, _enable: bool) {
+    fn set_inverted(&mut self, enable: bool) {
+        self.inverted = enable;
     }
 
     fn monochrome(&self) -> bool {
-        false
+        self.monochrome
     }
 
     fn dithered(&self) -> bool {
-        false
+        self.dithered
     }
 
     fn inverted(&self) -> bool {
-        false
+        self.inverted
     }
 
     fn width(&self) -> u32 {
-        self.0.window().size().0
+        self.canvas.window().size().0
     }
 
     fn height(&self) -> u32 {
-        self.0.window().size().1
+        self.canvas.window().size().1
     }
 }
 
@@ -233,7 +252,7 @@ fn main() -> Result<(), Error> {
     let video_subsystem = sdl_context.video().unwrap();
     let (width, height) = CURRENT_DEVICE.dims;
     let window = video_subsystem
-                 .window("Plato Emulator", width, height)
+                 .window("Caesar Emulator", width, height)
                  .position_centered()
                  .build()
                  .unwrap();
@@ -241,7 +260,9 @@ fn main() -> Result<(), Error> {
     let mut fb = window.into_canvas().software().build().unwrap();
     fb.set_blend_mode(BlendMode::Blend);
 
-    let mut context = build_context(Box::new(FBCanvas(fb)))?;
+    let mut context = build_context(Box::new(FBCanvas { canvas: fb, monochrome: false, dithered: false, inverted: false, rotation: DEFAULT_ROTATION }))?;
+
+    context.fb.set_inverted(context.settings.inverted);
 
     if context.settings.import.startup_trigger {
         context.batch_import();
@@ -290,6 +311,11 @@ fn main() -> Result<(), Error> {
     println!("The framebuffer resolution is {} by {}.", context.fb.rect().width(),
                                                         context.fb.rect().height());
 
+    match context.settings.rotation_lock {
+        Some(plato_core::settings::RotationLock::Landscape) => { tx.send(Event::Select(EntryId::Rotate(CURRENT_DEVICE.from_canonical(1)))).ok(); },
+        Some(plato_core::settings::RotationLock::Portrait) => { tx.send(Event::Select(EntryId::Rotate(CURRENT_DEVICE.from_canonical(0)))).ok(); },
+        _ => (),
+    }
     let mut bus = VecDeque::with_capacity(4);
 
     'outer: loop {
@@ -397,10 +423,22 @@ fn main() -> Result<(), Error> {
 
         while let Ok(evt) = rx.recv_timeout(Duration::from_millis(20)) {
             match evt {
+                Event::Gesture(GestureEvent::MultiTap(points)) => {
+                    if let Some(action) = multitap_action(points, context.fb.rect(), &context.settings) {
+                        system_action(action, view.id(), &tx, &mut rq, &mut context);
+                    }
+                },
+                Event::Device(DeviceEvent::Button { code: ButtonCode::Light, status: ButtonStatus::Pressed, .. }) => {
+                    let action = context.settings.controls.action(Binding::GlobalLight);
+                    system_action(if action == Action::Default { Action::ToggleFrontlight } else { action }, view.id(), &tx, &mut rq, &mut context);
+                },
                 Event::Open(info) => {
                     let rotation = context.display.rotation;
-                    if let Some(n) = info.reader.as_ref()
-                                         .and_then(|r| r.rotation.map(|n| CURRENT_DEVICE.from_canonical(n))) {
+                    if let Some(n) = match context.settings.rotation_lock {
+                        Some(plato_core::settings::RotationLock::Portrait) => Some(CURRENT_DEVICE.from_canonical(0)),
+                        Some(plato_core::settings::RotationLock::Landscape) => Some(CURRENT_DEVICE.from_canonical(1)),
+                        _ => info.reader.as_ref().and_then(|r| r.rotation.map(|n| CURRENT_DEVICE.from_canonical(n))),
+                    } {
                         if n != rotation {
                             if let Ok(dims) = context.fb.set_rotation(n) {
                                 context.display.rotation = n;
@@ -433,8 +471,15 @@ fn main() -> Result<(), Error> {
                     view = next_view;
                 },
                 Event::Select(EntryId::Launch(app_cmd)) => {
+                    if view.is::<Notes>() && !view.handle_event(&Event::Save, &tx, &mut bus, &mut rq, &mut context) {
+                        process_render_queue(view.as_ref(), &mut rq, &mut context, &mut updating);
+                        continue;
+                    }
                     view.children_mut().retain(|child| !child.is::<Menu>());
                     let mut next_view: Box<dyn View> = match app_cmd {
+                        AppCmd::Gallery => Box::new(Gallery::new(context.fb.rect(), &mut rq, &mut context)),
+                        AppCmd::Notes => Box::new(Notes::new(context.fb.rect(), &mut rq, &mut context)),
+                        AppCmd::Settings => Box::new(Preferences::new(context.fb.rect(), &mut rq, &mut context)),
                         AppCmd::Sketch => {
                             Box::new(Sketch::new(context.fb.rect(), &mut rq, &mut context))
                         },
@@ -458,7 +503,7 @@ fn main() -> Result<(), Error> {
                 Event::Back => {
                     if let Some(v) = history.pop() {
                         view = v;
-                        if view.is::<Home>() {
+                        if view.is::<Home>() && context.settings.rotation_lock.is_none() {
                             if context.display.rotation % 2 != 1 {
                                 if let Ok(dims) = context.fb.set_rotation(DEFAULT_ROTATION) {
                                     context.display.rotation = DEFAULT_ROTATION;
@@ -466,6 +511,7 @@ fn main() -> Result<(), Error> {
                                 }
                             }
                         }
+                        if *view.rect() != context.fb.rect() { view.resize(context.fb.rect(), &tx, &mut rq, &mut context); }
                         view.handle_event(&Event::Reseed, &tx, &mut bus, &mut rq, &mut context);
                     }
                 },
@@ -519,7 +565,7 @@ fn main() -> Result<(), Error> {
                 Event::Select(EntryId::About) => {
                     let dialog = Dialog::new(ViewId::AboutDialog,
                                              None,
-                                             format!("Plato {}", env!("CARGO_PKG_VERSION")),
+                                             format!("Caesar {}", env!("CARGO_PKG_VERSION")),
                                              &mut context);
                     rq.add(RenderData::new(dialog.id(), *dialog.rect(), UpdateMode::Gui));
                     view.children_mut().push(Box::new(dialog) as Box<dyn View>);
@@ -549,13 +595,13 @@ fn main() -> Result<(), Error> {
                 },
                 Event::Select(EntryId::ToggleInverted) => {
                     context.fb.toggle_inverted();
+                    context.settings.inverted = context.fb.inverted();
                     rq.add(RenderData::new(view.id(), context.fb.rect(), UpdateMode::Gui));
                 },
                 Event::Select(EntryId::TakeScreenshot) => {
-                    let name = Local::now().format("screenshot-%Y%m%d_%H%M%S.png");
-                    let msg = match context.fb.save(&name.to_string()) {
-                        Err(e) => format!("Couldn't take screenshot: {}).", e),
-                        Ok(_) => format!("Saved {}.", name),
+                    let msg = match plato_core::captures::save_screenshot(&context) {
+                        Err(e) => format!("Couldn’t save screenshot: {}.", e),
+                        Ok(path) => format!("Saved {}.", path.display()),
                     };
                     let notif = Notification::new(msg, &tx, &mut rq, &mut context);
                     view.children_mut().push(Box::new(notif) as Box<dyn View>);
@@ -574,19 +620,8 @@ fn main() -> Result<(), Error> {
                         home.handle_event(&evt, &tx, &mut VecDeque::new(), &mut RenderQueue::new(), &mut context);
                     }
                 },
-                Event::SetWifi(enable) => {
-                    if context.settings.wifi != enable {
-                        context.settings.wifi = enable;
-                        if enable {
-                            let tx2 = tx.clone();
-                            thread::spawn(move || {
-                                thread::sleep(Duration::from_secs(2));
-                                tx2.send(Event::Device(DeviceEvent::NetUp)).ok();
-                            });
-                        } else {
-                            context.online = false;
-                        }
-                    }
+                Event::SetWifi(_) | Event::Device(DeviceEvent::NetUp) => {
+                    context.online = false;
                 },
                 Event::Device(DeviceEvent::RotateScreen(n)) => {
                     tx.send(Event::Select(EntryId::Rotate(n))).ok();

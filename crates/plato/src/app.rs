@@ -18,6 +18,11 @@ use plato_core::view::menu::{Menu, MenuKind};
 use plato_core::view::dictionary::Dictionary as DictionaryApp;
 use plato_core::view::calculator::Calculator;
 use plato_core::view::sketch::Sketch;
+use plato_core::view::gallery::Gallery;
+use plato_core::view::notes::Notes;
+use plato_core::view::preferences::Preferences;
+use plato_core::settings::controls::{Action, Binding, multitap_action};
+use plato_core::view::common::system_action;
 use plato_core::view::touch_events::TouchEvents;
 use plato_core::view::rotation_values::RotationValues;
 use plato_core::document::sys_info_as_html;
@@ -29,7 +34,7 @@ use plato_core::settings::{ButtonScheme, Settings, SETTINGS_PATH, RotationLock, 
 use plato_core::frontlight::{Frontlight, StandardFrontlight, NaturalFrontlight, PremixedFrontlight};
 use plato_core::lightsensor::{LightSensor, KoboLightSensor};
 use plato_core::battery::{Battery, KoboBattery};
-use plato_core::geom::{Rectangle, DiagDir, Region};
+use plato_core::geom::Rectangle;
 use plato_core::view::home::Home;
 use plato_core::view::reader::Reader;
 use plato_core::view::dialog::Dialog;
@@ -41,7 +46,7 @@ use plato_core::font::Fonts;
 use plato_core::rtc::Rtc;
 use plato_core::context::Context;
 
-pub const APP_NAME: &str = "Plato";
+pub const APP_NAME: &str = "Caesar";
 const FB_DEVICE: &str = "/dev/fb0";
 const RTC_DEVICE: &str = "/dev/rtc0";
 const TOUCH_INPUTS: [&str; 5] = ["/dev/input/by-path/platform-2-0010-event",
@@ -145,17 +150,14 @@ fn schedule_task(id: TaskId, event: Event, delay: Duration, hub: &Sender<Event>,
 
 fn resume(id: TaskId, tasks: &mut Vec<Task>, view: &mut dyn View, hub: &Sender<Event>, rq: &mut RenderQueue, context: &mut Context) {
     if id == TaskId::Suspend {
+        enforce_offline(context);
         tasks.retain(|task| task.id != TaskId::Suspend);
         if context.settings.frontlight {
             let levels = context.settings.frontlight_levels;
             context.frontlight.set_warmth(levels.warmth);
             context.frontlight.set_intensity(levels.intensity);
         }
-        if context.settings.wifi {
-            Command::new("scripts/wifi-enable.sh")
-                    .status()
-                    .ok();
-        }
+
     }
     if id == TaskId::Suspend || id == TaskId::PrepareSuspend {
         tasks.retain(|task| task.id != TaskId::PrepareSuspend);
@@ -181,20 +183,11 @@ fn power_off(view: &mut dyn View, history: &mut Vec<HistoryItem>, updating: &mut
     context.fb.update(interm.rect(), UpdateMode::Full).ok();
 }
 
-fn set_wifi(enable: bool, context: &mut Context) {
-    if context.settings.wifi == enable {
-        return;
-    }
-    context.settings.wifi = enable;
-    if context.settings.wifi {
-        Command::new("scripts/wifi-enable.sh")
-                .status()
-                .ok();
-    } else {
-        Command::new("scripts/wifi-disable.sh")
-                .status()
-                .ok();
-        context.online = false;
+fn enforce_offline(context: &mut Context) {
+    context.online = false;
+    match Command::new("scripts/wifi-disable.sh").status() {
+        Ok(status) if status.success() => (),
+        result => eprintln!("Offline radio shutdown needs attention: {:?}", result),
     }
 }
 
@@ -287,7 +280,7 @@ pub fn run() -> Result<(), Error> {
         }
     });
 
-    if context.settings.auto_suspend > 0.0 {
+    {
         let tx6 = tx.clone();
         thread::spawn(move || {
             loop {
@@ -299,11 +292,7 @@ pub fn run() -> Result<(), Error> {
 
     context.fb.set_inverted(context.settings.inverted);
 
-    if context.settings.wifi {
-        Command::new("scripts/wifi-enable.sh").status().ok();
-    } else {
-        Command::new("scripts/wifi-disable.sh").status().ok();
-    }
+    enforce_offline(&mut context);
 
     if context.settings.frontlight {
         let levels = context.settings.frontlight_levels;
@@ -333,6 +322,11 @@ pub fn run() -> Result<(), Error> {
     schedule_task(TaskId::CheckBattery, Event::CheckBattery,
                   BATTERY_REFRESH_INTERVAL, &tx, &mut tasks);
     tx.send(Event::WakeUp).ok();
+    match context.settings.rotation_lock {
+        Some(RotationLock::Landscape) => { tx.send(Event::Select(EntryId::Rotate(CURRENT_DEVICE.from_canonical(1)))).ok(); },
+        Some(RotationLock::Portrait) => { tx.send(Event::Select(EntryId::Rotate(CURRENT_DEVICE.from_canonical(0)))).ok(); },
+        _ => (),
+    }
 
     while let Ok(evt) = rx.recv() {
         match evt {
@@ -357,7 +351,8 @@ pub fn run() -> Result<(), Error> {
                         }
                     },
                     DeviceEvent::Button { code: ButtonCode::Light, status: ButtonStatus::Pressed, .. } => {
-                        tx.send(Event::ToggleFrontlight).ok();
+                        let action = context.settings.controls.action(Binding::GlobalLight);
+                        system_action(if action == Action::Default { Action::ToggleFrontlight } else { action }, view.id(), &tx, &mut rq, &mut context);
                     },
                     DeviceEvent::CoverOn => {
                         if context.covered {
@@ -397,26 +392,7 @@ pub fn run() -> Result<(), Error> {
                         }
                     },
                     DeviceEvent::NetUp => {
-                        if tasks.iter().any(|task| task.id == TaskId::PrepareSuspend ||
-                                                   task.id == TaskId::Suspend) {
-                            continue;
-                        }
-                        let ip = Command::new("scripts/ip.sh").output()
-                                         .map(|o| String::from_utf8_lossy(&o.stdout).trim_end().to_string())
-                                         .unwrap_or_default();
-                        let essid = Command::new("scripts/essid.sh").output()
-                                            .map(|o| String::from_utf8_lossy(&o.stdout).trim_end().to_string())
-                                            .unwrap_or_default();
-                        let notif = Notification::new(format!("Network is up ({}, {}).", ip, essid),
-                                                      &tx, &mut rq, &mut context);
-                        context.online = true;
-                        view.children_mut().push(Box::new(notif) as Box<dyn View>);
-                        if view.is::<Home>() {
-                            view.handle_event(&evt, &tx, &mut bus, &mut rq, &mut context);
-                        } else if let Some(entry) = history.get_mut(0).filter(|entry| entry.view.is::<Home>()) {
-                            let (tx, _rx) = mpsc::channel();
-                            entry.view.handle_event(&evt, &tx, &mut VecDeque::new(), &mut RenderQueue::new(), &mut context);
-                        }
+                        enforce_offline(&mut context);
                     },
                     DeviceEvent::Plug(power_source) => {
                         if context.plugged {
@@ -476,12 +452,9 @@ pub fn run() -> Result<(), Error> {
                             if let Ok(settings) = load_toml::<Settings, _>(path)
                                                             .map_err(|e| eprintln!("Can't load settings: {:#}.", e)) {
                                 context.settings = settings;
+                                enforce_offline(&mut context);
                             }
-                            if context.settings.wifi {
-                                Command::new("scripts/wifi-enable.sh")
-                                        .status()
-                                        .ok();
-                            }
+
                             if context.settings.frontlight {
                                 let levels = context.settings.frontlight_levels;
                                 context.frontlight.set_warmth(levels.warmth);
@@ -573,12 +546,7 @@ pub fn run() -> Result<(), Error> {
                     context.frontlight.set_intensity(0.0);
                     context.frontlight.set_warmth(0.0);
                 }
-                if context.settings.wifi {
-                    Command::new("scripts/wifi-disable.sh")
-                            .status()
-                            .ok();
-                    context.online = false;
-                }
+
                 // https://github.com/koreader/koreader/commit/71afe36
                 schedule_task(TaskId::Suspend, Event::Suspend,
                               SUSPEND_WAIT_DELAY, &tx, &mut tasks);
@@ -657,12 +625,7 @@ pub fn run() -> Result<(), Error> {
                     context.frontlight.set_intensity(0.0);
                     context.frontlight.set_warmth(0.0);
                 }
-                if context.settings.wifi {
-                    Command::new("scripts/wifi-disable.sh")
-                            .status()
-                            .ok();
-                    context.online = false;
-                }
+
 
                 let interm = Intermission::new(context.fb.rect(), IntermKind::Share, &context);
                 rq.add(RenderData::new(interm.id(), *interm.rect(), UpdateMode::Full));
@@ -684,25 +647,9 @@ pub fn run() -> Result<(), Error> {
                         exit_status = ExitStatus::PowerOff;
                         break;
                     },
-                    GestureEvent::MultiTap(mut points) => {
-                        if points[0].x > points[1].x {
-                            points.swap(0, 1);
-                        }
-                        let rect = context.fb.rect();
-                        let r1 = Region::from_point(points[0], rect,
-                                                    context.settings.reader.strip_width,
-                                                    context.settings.reader.corner_width);
-                        let r2 = Region::from_point(points[1], rect,
-                                                    context.settings.reader.strip_width,
-                                                    context.settings.reader.corner_width);
-                        match (r1, r2) {
-                            (Region::Corner(DiagDir::SouthWest), Region::Corner(DiagDir::NorthEast)) => {
-                                rq.add(RenderData::new(view.id(), context.fb.rect(), UpdateMode::Full));
-                            },
-                            (Region::Corner(DiagDir::NorthWest), Region::Corner(DiagDir::SouthEast)) => {
-                                tx.send(Event::Select(EntryId::TakeScreenshot)).ok();
-                            },
-                            _ => (),
+                    GestureEvent::MultiTap(points) => {
+                        if let Some(action) = multitap_action(points, context.fb.rect(), &context.settings) {
+                            system_action(action, view.id(), &tx, &mut rq, &mut context);
                         }
                     },
                     _ => {
@@ -758,7 +705,7 @@ pub fn run() -> Result<(), Error> {
             Event::Select(EntryId::About) => {
                 let dialog = Dialog::new(ViewId::AboutDialog,
                                          None,
-                                         format!("Plato {}", env!("CARGO_PKG_VERSION")),
+                                         format!("Caesar {}", env!("CARGO_PKG_VERSION")),
                                          &mut context);
                 rq.add(RenderData::new(dialog.id(), *dialog.rect(), UpdateMode::Gui));
                 view.children_mut().push(Box::new(dialog) as Box<dyn View>);
@@ -791,9 +738,16 @@ pub fn run() -> Result<(), Error> {
                 view = next_view;
             },
             Event::Select(EntryId::Launch(app_cmd)) => {
+                    if view.is::<Notes>() && !view.handle_event(&Event::Save, &tx, &mut bus, &mut rq, &mut context) {
+                        process_render_queue(view.as_ref(), &mut rq, &mut context, &mut updating);
+                        continue;
+                    }
                 view.children_mut().retain(|child| !child.is::<Menu>());
                 let monochrome = context.fb.monochrome();
                 let mut next_view: Box<dyn View> = match app_cmd {
+                    AppCmd::Gallery => Box::new(Gallery::new(context.fb.rect(), &mut rq, &mut context)),
+                    AppCmd::Notes => Box::new(Notes::new(context.fb.rect(), &mut rq, &mut context)),
+                    AppCmd::Settings => Box::new(Preferences::new(context.fb.rect(), &mut rq, &mut context)),
                     AppCmd::Sketch => {
                         context.fb.set_monochrome(true);
                         Box::new(Sketch::new(context.fb.rect(), &mut rq, &mut context))
@@ -826,14 +780,20 @@ pub fn run() -> Result<(), Error> {
                     if item.dithered != context.fb.dithered() {
                         context.fb.set_dithered(item.dithered);
                     }
-                    if CURRENT_DEVICE.orientation(item.rotation) != CURRENT_DEVICE.orientation(context.display.rotation) {
+                    let rotation = match context.settings.rotation_lock {
+                        Some(RotationLock::Portrait) => CURRENT_DEVICE.from_canonical(0),
+                        Some(RotationLock::Landscape) => CURRENT_DEVICE.from_canonical(1),
+                        _ => item.rotation,
+                    };
+                    if CURRENT_DEVICE.orientation(rotation) != CURRENT_DEVICE.orientation(context.display.rotation) {
                         wait_for_all(&mut updating, &mut context);
-                        if let Ok(dims) = context.fb.set_rotation(item.rotation) {
-                            raw_sender.send(display_rotate_event(item.rotation)).ok();
-                            context.display.rotation = item.rotation;
+                        if let Ok(dims) = context.fb.set_rotation(rotation) {
+                            raw_sender.send(display_rotate_event(rotation)).ok();
+                            context.display.rotation = rotation;
                             context.display.dims = dims;
                         }
                     }
+                    if *view.rect() != context.fb.rect() { view.resize(context.fb.rect(), &tx, &mut rq, &mut context); }
                     view.handle_event(&Event::Reseed, &tx, &mut bus, &mut rq, &mut context);
                 } else if !view.is::<Home>() {
                     break;
@@ -922,17 +882,12 @@ pub fn run() -> Result<(), Error> {
                     }
                 }
             },
-            Event::SetWifi(enable) => {
-                set_wifi(enable, &mut context);
-            },
-            Event::Select(EntryId::ToggleWifi) => {
-                set_wifi(!context.settings.wifi, &mut context);
-            },
+            // Ignore requests from legacy hooks: Caesar never enables networking.
+            Event::SetWifi(_) => enforce_offline(&mut context),
             Event::Select(EntryId::TakeScreenshot) => {
-                let name = Local::now().format("screenshot-%Y%m%d_%H%M%S.png");
-                let msg = match context.fb.save(&name.to_string()) {
-                    Err(e) => format!("{}", e),
-                    Ok(_) => format!("Saved {}.", name),
+                let msg = match plato_core::captures::save_screenshot(&context) {
+                    Err(e) => format!("Couldn’t save screenshot: {}.", e),
+                    Ok(path) => format!("Saved {}.", path.display()),
                 };
                 let notif = Notification::new(msg, &tx, &mut rq, &mut context);
                 view.children_mut().push(Box::new(notif) as Box<dyn View>);
@@ -955,6 +910,8 @@ pub fn run() -> Result<(), Error> {
                 break;
             },
             Event::Select(EntryId::Quit) => {
+                power_off(view.as_mut(), &mut history, &mut updating, &mut context);
+                exit_status = ExitStatus::PowerOff;
                 break;
             },
             Event::MightSuspend if context.settings.auto_suspend > 0.0 => {

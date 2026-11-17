@@ -737,11 +737,43 @@ pub fn sort_year(i1: &Info, i2: &Info) -> Ordering {
 }
 
 pub fn sort_series(i1: &Info, i2: &Info) -> Ordering {
-    i1.series.cmp(&i2.series).then_with(|| {
-        usize::from_str_radix(&i1.number, 10).ok()
-              .zip(usize::from_str_radix(&i2.number, 10).ok())
-              .map_or_else(|| i1.number.cmp(&i2.number), |(a, b)| a.cmp(&b))
-    })
+    i1.series.cmp(&i2.series)
+      .then_with(|| compare_series_numbers(&i1.number, &i2.number))
+}
+
+// Compare decimal metadata exactly, including fractional books and leading zeroes.
+// Keeping numeric and nonnumeric values in separate groups makes the ordering
+// transitive even when a series contains missing or malformed indices.
+fn compare_series_numbers(a: &str, b: &str) -> Ordering {
+    fn decimal(value: &str) -> Option<(bool, &str, &str)> {
+        let value = value.trim();
+        let negative = value.starts_with('-');
+        let unsigned = value.strip_prefix(['-', '+']).unwrap_or(value);
+        let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+        if (integer.is_empty() && fraction.is_empty()) ||
+           !integer.bytes().chain(fraction.bytes()).all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let integer = integer.trim_start_matches('0');
+        let fraction = fraction.trim_end_matches('0');
+        Some((negative && !(integer.is_empty() && fraction.is_empty()), integer, fraction))
+    }
+
+    match (decimal(a), decimal(b)) {
+        (Some((negative_a, integer_a, fraction_a)),
+         Some((negative_b, integer_b, fraction_b))) => {
+            let magnitude = integer_a.len().cmp(&integer_b.len())
+                                     .then_with(|| integer_a.cmp(integer_b))
+                                     .then_with(|| fraction_a.cmp(fraction_b));
+            negative_b.cmp(&negative_a).then_with(|| {
+                if negative_a { magnitude.reverse() } else { magnitude }
+            })
+        },
+        (Some(..), None) => if b.trim().is_empty() { Ordering::Greater } else { Ordering::Less },
+        (None, Some(..)) => if a.trim().is_empty() { Ordering::Less } else { Ordering::Greater },
+        (None, None) => b.trim().is_empty().cmp(&a.trim().is_empty())
+                                       .then_with(|| a.cmp(b)),
+    }
 }
 
 pub fn sort_filename(i1: &Info, i2: &Info) -> Ordering {
@@ -932,4 +964,68 @@ pub fn file_name_from_info(info: &Info) -> String {
         .replace('?', "")
         .replace('!', "")
         .replace(':', "")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn book(series: &str, number: &str) -> Info {
+        Info { series: series.to_string(), number: number.to_string(), ..Info::default() }
+    }
+
+    #[test]
+    fn series_sort_orders_thirteen_books_numerically() {
+        // Calibre and EPUB metadata can represent whole book indices as decimals.
+        for decimal in [false, true] {
+            let mut books: Metadata = (1..=13).rev().map(|n| {
+                let number = if decimal { format!("{}.0", n) } else { n.to_string() };
+                book("A Series of Unfortunate Events", &number)
+            }).collect();
+            sort(&mut books, SortMethod::Series, false);
+            let numbers: Vec<_> = books.iter().map(|b| b.number.parse::<f64>().unwrap()).collect();
+            assert_eq!(numbers, (1..=13).map(f64::from).collect::<Vec<_>>());
+            sort(&mut books, SortMethod::Series, true);
+            let numbers: Vec<_> = books.iter().map(|b| b.number.parse::<f64>().unwrap()).collect();
+            assert_eq!(numbers, (1..=13).rev().map(f64::from).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn series_sort_preserves_fractional_indices_and_series_groups() {
+        let mut books = vec![book("B", "1"), book("A", "11.0"), book("A", "2"),
+                             book("A", "1.5"), book("A", "1.05"), book("A", "1")];
+        sort(&mut books, SortMethod::Series, false);
+        let indices: Vec<_> = books.iter().map(|b| (b.series.as_str(), b.number.as_str())).collect();
+        assert_eq!(indices, vec![("A", "1"), ("A", "1.05"), ("A", "1.5"),
+                                 ("A", "2"), ("A", "11.0"), ("B", "1")]);
+        for (a, b) in [("02", "2.0"), (" 2.00 ", "+2"), ("-0.0", "0"), (".5", "0.50")] {
+            assert_eq!(compare_series_numbers(a, b), Ordering::Equal);
+        }
+        assert_eq!(compare_series_numbers("-2", "-1.5"), Ordering::Less);
+        assert_eq!(compare_series_numbers("99999999999999999999", "100000000000000000000"), Ordering::Less);
+        assert_eq!(compare_series_numbers("1.00000000000000000001", "1.00000000000000000002"), Ordering::Less);
+    }
+
+    #[test]
+    fn series_sort_has_consistent_order_with_missing_and_nonnumeric_indices() {
+        let values = ["", " ", "\u{2003}", "-2", "-1.5", "-0", "0", "1", "1.0", "1.5",
+                      "2", "10", "11.0", "!", "1a", "2a", "Extras", "NaN", "inf", "1.2.3"];
+        for a in values {
+            for b in values {
+                let ab = compare_series_numbers(a, b);
+                assert_eq!(ab, compare_series_numbers(b, a).reverse(), "{a:?}, {b:?}");
+                for c in values {
+                    if ab != Ordering::Greater && compare_series_numbers(b, c) != Ordering::Greater {
+                        assert_ne!(compare_series_numbers(a, c), Ordering::Greater, "{a:?}, {b:?}, {c:?}");
+                    }
+                }
+            }
+        }
+        let mut books: Metadata = ["Extras", "11.0", "", "2", "1a"].iter()
+            .map(|n| book("A", n)).collect();
+        sort(&mut books, SortMethod::Series, false);
+        assert_eq!(books.iter().map(|b| b.number.as_str()).collect::<Vec<_>>(),
+                   vec!["", "2", "11.0", "1a", "Extras"]);
+    }
 }

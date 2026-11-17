@@ -104,9 +104,13 @@ impl TopBar {
     }
 
     pub fn reseed(&mut self, rq: &mut RenderQueue, context: &mut Context) {
+        let mut rect = *self.children[2].rect();
+        self.children[2] = Box::new(Clock::new(&mut rect, context));
+        self.children[1].rect_mut().max.x = rect.min.x;
         self.update_frontlight_icon(rq, context);
         self.update_clock_label(rq);
         self.update_battery_widget(rq, context);
+        rq.add(RenderData::new(self.id, self.rect, UpdateMode::Gui));
     }
 }
 

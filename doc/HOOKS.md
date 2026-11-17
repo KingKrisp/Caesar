@@ -1,4 +1,7 @@
-Hooks are defined in `Settings.toml`.
+> Upstream Plato documentation retained for reference. Caesar disables hook
+> execution and ignores hook configuration to keep the reader offline.
+
+Hooks are defined in `Settings.toml` in upstream Plato.
 
 Here's an example hook, that launches the default article fetcher included in
 *Plato*'s release archive:

@@ -4,10 +4,32 @@ use crate::device::CURRENT_DEVICE;
 use crate::settings::{ButtonScheme, RotationLock};
 use crate::framebuffer::UpdateMode;
 use crate::geom::{Point, Rectangle};
-use super::{View, RenderQueue, RenderData, ViewId, AppCmd, EntryId, EntryKind};
+use super::{View, Event, RenderQueue, RenderData, ViewId, AppCmd, EntryId, EntryKind};
 use super::menu::{Menu, MenuKind};
 use super::notification::Notification;
 use crate::context::Context;
+
+pub fn system_action(action: crate::settings::controls::Action, id: super::Id, hub: &super::Hub,
+                     rq: &mut RenderQueue, context: &mut Context) -> bool {
+    use crate::settings::controls::Action;
+    let event = match action {
+        Action::Disabled => return true,
+        Action::Refresh => {
+            rq.add(RenderData::new(id, context.fb.rect(), UpdateMode::Full));
+            return true;
+        },
+        Action::Screenshot => Event::Select(EntryId::TakeScreenshot),
+        Action::ToggleFrontlight => Event::ToggleFrontlight,
+        Action::ToggleInverted => Event::Select(EntryId::ToggleInverted),
+        Action::ToggleDithered => Event::Select(EntryId::ToggleDithered),
+        Action::Settings => Event::Select(EntryId::Launch(AppCmd::Settings)),
+        Action::Notes => Event::Select(EntryId::Launch(AppCmd::Notes)),
+        Action::Gallery => Event::Select(EntryId::Launch(AppCmd::Gallery)),
+        _ => return false,
+    };
+    hub.send(event).ok();
+    true
+}
 
 pub fn shift(view: &mut dyn View, delta: Point) {
     *view.rect_mut() += delta;
@@ -85,12 +107,19 @@ pub fn toggle_main_menu(view: &mut dyn View, rect: Rectangle, enable: Option<boo
                                            EntryId::Launch(AppCmd::Calculator)),
                         EntryKind::Command("Sketch".to_string(),
                                            EntryId::Launch(AppCmd::Sketch)),
+                        EntryKind::Command("Gallery".to_string(),
+                                           EntryId::Launch(AppCmd::Gallery)),
+                        EntryKind::Command("Notes".to_string(),
+                                           EntryId::Launch(AppCmd::Notes)),
+                        EntryKind::Command("Settings".to_string(),
+                                           EntryId::Launch(AppCmd::Settings)),
                         EntryKind::Separator,
                         EntryKind::Command("Touch Events".to_string(),
                                            EntryId::Launch(AppCmd::TouchEvents)),
                         EntryKind::Command("Rotation Values".to_string(),
                                            EntryId::Launch(AppCmd::RotationValues))];
-        let mut entries = vec![EntryKind::Command("About".to_string(),
+        let mut entries = vec![EntryKind::Command("Settings".to_string(), EntryId::Launch(AppCmd::Settings)),
+                               EntryKind::Command("About".to_string(),
                                                   EntryId::About),
                                EntryKind::Command("System Info".to_string(),
                                                   EntryId::SystemInfo),
@@ -98,9 +127,6 @@ pub fn toggle_main_menu(view: &mut dyn View, rect: Rectangle, enable: Option<boo
                                EntryKind::CheckBox("Invert Colors".to_string(),
                                                    EntryId::ToggleInverted,
                                                    context.fb.inverted()),
-                               EntryKind::CheckBox("Enable WiFi".to_string(),
-                                                   EntryId::ToggleWifi,
-                                                   context.settings.wifi),
                                EntryKind::Separator,
                                EntryKind::SubMenu("Rotate".to_string(), rotate),
                                EntryKind::Command("Take Screenshot".to_string(),
@@ -110,7 +136,8 @@ pub fn toggle_main_menu(view: &mut dyn View, rect: Rectangle, enable: Option<boo
                                EntryKind::Separator];
 
         entries.push(EntryKind::Command("Reboot".to_string(), EntryId::Reboot));
-        entries.push(EntryKind::Command("Quit".to_string(), EntryId::Quit));
+        let exit_label = if cfg!(target_arch = "arm") { "Power Off" } else { "Quit" };
+        entries.push(EntryKind::Command(exit_label.to_string(), EntryId::Quit));
 
         if CURRENT_DEVICE.has_page_turn_buttons() {
             let button_scheme = context.settings.button_scheme;

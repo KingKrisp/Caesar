@@ -47,6 +47,9 @@ fi
 # Remount the SD card read-write if it's mounted read-only
 grep -q ' /mnt/sd .*[ ,]ro[ ,]' /proc/mounts && mount -o remount,rw /mnt/sd
 
+# Keep the radio off before starting Caesar, including direct-boot setups.
+./scripts/wifi-disable.sh
+
 # Define environment variables used by `scripts/usb-*.sh`
 KOBO_TAG=/mnt/onboard/.kobo/version
 if [ -e "$KOBO_TAG" ] ; then
@@ -114,5 +117,6 @@ if [ -e /tmp/reboot ] ; then
 elif [ -e /tmp/power_off ] ; then
 	poweroff -f
 else
-	./nickel.sh &
+	./scripts/wifi-disable.sh
+	poweroff -f
 fi

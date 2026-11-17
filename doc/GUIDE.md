@@ -16,7 +16,14 @@ The hyphenation bounds for a particular language can be overridden by creating a
 
 Dictionaries in the *StarDict* and *dictd* formats can be placed in the `dictionaries` directory. *StarDict* dictionaries should be placed as uncompressed folders containing an `.ifo` file. *Plato* doesn't support *StarDict* natively and will therefore convert all the *StarDict* dictionaries it might find in the `dictionaries` directory during startup. You can disable this behavior by uncommenting the corresponding line in `config.sh`.
 
-The four scripts `scripts/wifi-{pre,post}-{up,down}.sh` can be created with commands to run before or after the WiFi is enabled or disabled, respectively.
+Caesar is offline only. Wi-Fi controls, online fetcher hooks, and external-link
+queuing are disabled even when loading old Plato settings. Wi-Fi pre/post hooks
+are never run. The old `wifi-enable.sh` and `nickel.sh` filenames are retained as
+deny stubs so upgrading over an existing installation replaces those entry points.
+
+The Caesar launcher shuts down the reader when Caesar exits; it does not start
+Kobo's stock interface. Device-wide enforcement still requires checking the
+device's actual direct-boot script and verifying radio shutdown on hardware.
 
 ## Upgrade
 

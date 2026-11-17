@@ -28,6 +28,8 @@ cp libs/libmupdf.so dist/libs
 cp -R hyphenation-patterns dist
 cp -R keyboard-layouts dist
 cp -R bin dist
+# Online fetchers are not part of Caesar's offline distribution.
+rm -rf dist/bin/article_fetcher
 cp -R scripts dist
 cp -R icons dist
 cp -R resources dist

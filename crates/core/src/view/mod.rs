@@ -40,6 +40,9 @@ pub mod reader;
 pub mod dictionary;
 pub mod calculator;
 pub mod sketch;
+pub mod gallery;
+pub mod notes;
+pub mod preferences;
 pub mod touch_events;
 pub mod rotation_values;
 
@@ -368,6 +371,9 @@ pub enum Event {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AppCmd {
+    Settings,
+    Notes,
+    Gallery,
     Sketch,
     Calculator,
     Dictionary {
@@ -565,7 +571,6 @@ pub enum EntryId {
     ToggleFuzzy,
     ToggleInverted,
     ToggleDithered,
-    ToggleWifi,
     Rotate(i8),
     Launch(AppCmd),
     SetPenSize(i32),
@@ -575,6 +580,18 @@ pub enum EntryId {
     New,
     Refresh,
     TakeScreenshot,
+    GalleryFolder(bool),
+    GalleryOpen(usize),
+    NoteNew,
+    NoteOpen(usize),
+    NoteChanged,
+    NoteHeading,
+    NoteBold,
+    NoteItalic,
+    NotePreview,
+    SettingsSection(u8),
+    SettingsChoose(usize),
+    SettingsApply(usize),
     Reboot,
     Quit,
 }

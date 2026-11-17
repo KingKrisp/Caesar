@@ -18,6 +18,8 @@ pub mod rtc;
 pub mod settings;
 pub mod font;
 pub mod context;
+pub mod captures;
+pub mod notes;
 pub mod gesture;
 
 pub use anyhow;

@@ -10,8 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::path::PathBuf;
-use std::io::prelude::*;
-use std::fs::OpenOptions;
 use std::collections::{VecDeque, BTreeMap};
 use fxhash::{FxHashMap, FxHashSet};
 use chrono::Local;
@@ -2694,6 +2692,39 @@ impl Reader {
 
 impl View for Reader {
     fn handle_event(&mut self, evt: &Event, hub: &Hub, _bus: &mut Bus, rq: &mut RenderQueue, context: &mut Context) -> bool {
+        use crate::settings::controls::{Action, reader_binding};
+        if self.focus.is_none() && (self.state == State::Idle || matches!(evt, Event::Gesture(GestureEvent::HoldFingerLong(..)))) {
+            if let Some(binding) = reader_binding(evt, self.rect, context.settings.reader.strip_width, context.settings.reader.corner_width) {
+                let action = context.settings.controls.action(binding);
+                if action != Action::Default {
+                    if let Event::Device(DeviceEvent::Button { code, status: ButtonStatus::Released, .. }) = evt {
+                        if self.held_buttons.remove(code) { return true; }
+                    }
+                    if let Event::Gesture(GestureEvent::HoldButtonShort(code, ..)) = evt { self.held_buttons.insert(*code); }
+                    if super::common::system_action(action, self.id, hub, rq, context) { return true; }
+                    match action {
+                        Action::PreviousPage => self.go_to_neighbor(CycleDir::Previous, hub, rq, context),
+                        Action::NextPage => self.go_to_neighbor(CycleDir::Next, hub, rq, context),
+                        Action::PreviousChapter => self.go_to_chapter(CycleDir::Previous, hub, rq, context),
+                        Action::NextChapter => self.go_to_chapter(CycleDir::Next, hub, rq, context),
+                        Action::FirstPage => self.go_to_page(0, true, hub, rq, context),
+                        Action::LastPage => self.go_to_last_page(hub, rq, context),
+                        Action::GoToPage => { hub.send(Event::Toggle(ViewId::GoToPage)).ok(); },
+                        Action::TableOfContents => { hub.send(Event::Show(ViewId::TableOfContents)).ok(); },
+                        Action::ToggleBookmark => self.toggle_bookmark(rq),
+                        Action::PreviousBookmark => self.go_to_bookmark(CycleDir::Previous, hub, rq, context),
+                        Action::NextBookmark => self.go_to_bookmark(CycleDir::Next, hub, rq, context),
+                        Action::PreviousAnnotation => self.go_to_annotation(CycleDir::Previous, hub, rq, context),
+                        Action::NextAnnotation => self.go_to_annotation(CycleDir::Next, hub, rq, context),
+                        Action::ToggleBars => self.toggle_bars(None, hub, rq, context),
+                        Action::Search => self.toggle_search_bar(true, hub, rq, context),
+                        Action::Back => { self.quit(context); hub.send(Event::Back).ok(); },
+                        _ => (),
+                    }
+                    return true;
+                }
+            }
+        }
         match *evt {
             Event::Gesture(GestureEvent::Rotate { quarter_turns, .. }) if quarter_turns != 0 => {
                 let (_, dir) = CURRENT_DEVICE.mirroring_scheme();
@@ -3135,19 +3166,8 @@ impl View for Reader {
                             hub.send(Event::GoTo(location)).ok();
                         } else {
                             if link.text.starts_with("https:") || link.text.starts_with("http:") {
-                                if let Some(path) = context.settings.external_urls_queue.as_ref() {
-                                    if let Ok(mut file) = OpenOptions::new().create(true)
-                                                                            .append(true)
-                                                                            .open(path) {
-                                        if let Err(e) = writeln!(file, "{}", link.text) {
-                                            eprintln!("Couldn't write to {}: {:#}.", path.display(), e);
-                                        } else {
-                                            let message = format!("Queued {}.", link.text);
-                                            let notif = Notification::new(message, hub, rq, context);
-                                            self.children.push(Box::new(notif) as Box<dyn View>);
-                                        }
-                                    }
-                                }
+                                let notif = Notification::new("Caesar is offline. External links are disabled.".to_string(), hub, rq, context);
+                                self.children.push(Box::new(notif) as Box<dyn View>);
                             } else {
                                 eprintln!("Can't resolve URI: {}.", link.text);
                             }

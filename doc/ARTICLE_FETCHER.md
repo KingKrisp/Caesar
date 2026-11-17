@@ -1,4 +1,7 @@
-A *wallabag* article fetcher is distributed in the release archive, in `bin/article_fetcher`.
+> Upstream Plato documentation retained for reference. Caesar does not distribute
+> or launch the article fetcher; online operations are disabled.
+
+Upstream Plato distributed a *wallabag* article fetcher in `bin/article_fetcher`.
 
 ## Configuration
 

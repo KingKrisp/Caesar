@@ -1282,9 +1282,10 @@ impl Home {
     }
 
     fn insert_fetcher(&mut self, hook: &Hook, hub: &Hub, context: &Context) {
+        if crate::settings::OFFLINE { return; }
         let library_path = &context.library.home;
         let save_path = context.library.home.join(&hook.path);
-        match self.spawn_child(library_path, &save_path, &hook.program, context.settings.wifi, context.online, hub) {
+        match self.spawn_child(library_path, &save_path, &hook.program, false, false, hub) {
             Ok(process) => {
                 let mut sort_method = hook.sort_method;
                 let mut first_column = hook.first_column;
@@ -1381,6 +1382,16 @@ impl Home {
     }
 
     fn reseed(&mut self, hub: &Hub, rq: &mut RenderQueue, context: &mut Context) {
+        let address = context.settings.home.address_bar;
+        let navigation = context.settings.home.navigation_bar;
+        self.toggle_address_bar(Some(address), false, hub, rq, context);
+        self.toggle_navigation_bar(Some(navigation), false, hub, rq, context);
+        let settings = &context.settings.libraries[context.settings.selected_library];
+        if let Some(shelf) = self.children[self.shelf_index].downcast_mut::<Shelf>() {
+            shelf.set_first_column(settings.first_column);
+            shelf.set_second_column(settings.second_column);
+            shelf.set_thumbnail_previews(settings.thumbnail_previews);
+        }
         context.library.sort(self.sort_method, self.reverse_order);
         self.refresh_visibles(true, false, hub, &mut RenderQueue::new(), context);
 

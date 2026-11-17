@@ -1,47 +1,26 @@
 #! /bin/sh
+# No pre/post hooks: an old user hook must not re-enable the radio.
+command -v rfkill >/dev/null 2>&1 && rfkill block wlan
+killall -q wpa_supplicant udhcpc default.script dhcpcd dhcpcd-dbus
 
-POWER_TOGGLE=module
-case "$WIFI_MODULE" in
-	moal)
-		POWER_TOGGLE=ntx_io
-		;;
-	wlan_drv_gen4m)
-		POWER_TOGGLE=wmt
-		;;
+# Shut interfaces down even if the driver/module environment is missing.
+status=0
+for interface in "${INTERFACE:-wlan0}" /sys/class/net/*; do
+    interface=${interface##*/}
+    [ "$interface" != lo ] || continue
+    [ -e "/sys/class/net/$interface" ] || continue
+    command -v wpa_cli >/dev/null 2>&1 && wpa_cli -i "$interface" terminate
+    ifconfig "$interface" down
+    flags=$(cat "/sys/class/net/$interface/flags" 2>/dev/null)
+    [ -z "$flags" ] || [ "$((flags & 1))" -eq 0 ] || status=1
+done
+
+case "${WIFI_MODULE:-}" in
+    dhd) rmmod dhd ;;
+    moal) rmmod moal; rmmod mlan; ioctl -q -v 0 /dev/ntx_io 208 ;;
+    wlan_drv_gen4m) rmmod wlan_drv_gen4m; [ ! -e /dev/wmtWifi ] || echo 0 > /dev/wmtWifi ;;
+    "") : ;;
+    *) rmmod "$WIFI_MODULE" ;;
 esac
-
-if [ "$POWER_TOGGLE" != wmt ]; then
-	grep -q "^${WIFI_MODULE}\b" /proc/modules || exit 1
-fi
-
-SCRIPTS_DIR=$(dirname "$0")
-PRE_DOWN_SCRIPT=$SCRIPTS_DIR/wifi-pre-down.sh
-[ -e "$PRE_DOWN_SCRIPT" ] && $PRE_DOWN_SCRIPT
-
-killall -q udhcpc default.script
-
-wpa_cli -i "$INTERFACE" terminate
-[ "$WIFI_MODULE" = dhd ] && wlarm_le -i "$INTERFACE" down
-ifconfig "$INTERFACE" down
-
-sleep 0.2
-
-[ "$POWER_TOGGLE" != wmt ] && rmmod "$WIFI_MODULE"
-[ "$WIFI_MODULE" = moal ] && rmmod mlan
-
-case "$POWER_TOGGLE" in
-	ntx_io)
-		# CM_WIFI_CTRL
-		ioctl -q -v 0 /dev/ntx_io 208
-		;;
-	wmt)
-		echo 0 > /dev/wmtWifi
-		;;
-	module)
-		rmmod sdio_wifi_pwr
-		;;
-esac
-
-
-POST_DOWN_SCRIPT=$SCRIPTS_DIR/wifi-post-down.sh
-[ -e "$POST_DOWN_SCRIPT" ] && $POST_DOWN_SCRIPT
+rmmod sdio_wifi_pwr 2>/dev/null || :
+exit "$status"
