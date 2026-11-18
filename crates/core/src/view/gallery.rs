@@ -13,7 +13,7 @@ use crate::unit::scale_by_dpi;
 use super::{Align, Bus, EntryId, Event, Hub, Id, ID_FEEDER, RenderData, RenderQueue,
             View, ViewId, SMALL_BAR_HEIGHT};
 use super::button::Button;
-use super::common::{toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
+use super::common::{add_pagination, toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
 use super::image::Image;
 use super::file_actions::FileActions;
 use super::label::Label;
@@ -95,9 +95,7 @@ impl Gallery {
             let label = rect![rect.min.x, top.max.y, rect.max.x, top.max.y + bar];
             self.children.push(Box::new(Label::new(label,
                 path.file_name().unwrap_or_default().to_string_lossy().into_owned(), Align::Center)));
-            let actions = rect![rect.min.x + gap, label.max.y + gap, rect.max.x - gap, label.max.y + bar - gap];
-            self.children.push(Box::new(Button::new(actions, Event::Select(EntryId::GalleryFile(index)), "Rename or delete".into())));
-            let content = rect![rect.min.x + gap, label.max.y + bar + gap,
+            let content = rect![rect.min.x + gap, label.max.y + gap,
                                 rect.max.x - gap, footer.min.y - gap];
             let pixmap = PdfOpener::new().and_then(|opener| opener.open(path))
                 .and_then(|mut doc| doc.preview_pixmap(content.width().saturating_sub(2) as f32,
@@ -127,12 +125,11 @@ impl Gallery {
             let start = self.page * self.per_page();
             for (row, path) in self.files.iter().skip(start).take(self.per_page()).enumerate() {
                 let row_rect = rect![rect.min.x + gap, folder_rect.max.y + row as i32 * bar + gap,
-                                     rect.max.x - third / 2 - gap, folder_rect.max.y + (row as i32 + 1) * bar - gap];
+                                     rect.max.x - gap, folder_rect.max.y + (row as i32 + 1) * bar - gap];
                 let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 self.children.push(Box::new(Button::new(row_rect,
-                    Event::Select(EntryId::GalleryOpen(start + row)), name)));
-                self.children.push(Box::new(Button::new(rect![rect.max.x - third / 2 + gap, row_rect.min.y, rect.max.x - gap, row_rect.max.y],
-                    Event::Select(EntryId::GalleryFile(start + row)), "File".into())));
+                    Event::Select(EntryId::GalleryOpen(start + row)), name)
+                    .with_hold_event(move |point| Event::Select(EntryId::GalleryFile(start + row, point)))));
             }
             if self.files.is_empty() {
                 let empty_rect = rect![rect.min.x, folder_rect.max.y, rect.max.x, footer.min.y];
@@ -143,16 +140,7 @@ impl Gallery {
             }
             (self.page, self.pages())
         };
-        for (text, dir, x, disabled) in [
-            ("Previous", CycleDir::Previous, footer.min.x, position == 0),
-            ("Next", CycleDir::Next, footer.max.x - third, position + 1 >= count),
-        ] {
-            let button_rect = rect![x + gap, footer.min.y + gap, x + third - gap, footer.max.y - gap];
-            self.children.push(Box::new(Button::new(button_rect, Event::Page(dir), text.to_string()).disabled(disabled)));
-        }
-        let page_rect = rect![footer.min.x + third, footer.min.y, footer.max.x - third, footer.max.y];
-        let text = if count == 0 { "0 / 0".to_string() } else { format!("{} / {}", position + 1, count) };
-        self.children.push(Box::new(Label::new(page_rect, text, Align::Center)));
+        add_pagination(&mut self.children, footer, position, count);
         rq.add(RenderData::new(self.id, rect, UpdateMode::Full));
     }
 
@@ -170,16 +158,22 @@ impl Gallery {
 }
 
 impl View for Gallery {
-    fn handle_event(&mut self, evt: &Event, _hub: &Hub, _bus: &mut Bus, rq: &mut RenderQueue, context: &mut Context) -> bool {
+    fn handle_event(&mut self, evt: &Event, _hub: &Hub, bus: &mut Bus, rq: &mut RenderQueue, context: &mut Context) -> bool {
         match *evt {
-            Event::Select(EntryId::GalleryFile(index)) if index < self.files.len() => {
+            Event::Gesture(GestureEvent::HoldFingerShort(point, _)) if self.selected.is_some() &&
+                self.rect.includes(point) && point.y >= self.children[0].rect().max.y &&
+                point.y < self.rect.max.y - self.bar_height() => {
+                bus.push_back(Event::Select(EntryId::GalleryFile(self.selected.unwrap(), point)));
+                true
+            },
+            Event::Select(EntryId::GalleryFile(index, point)) if index < self.files.len() => {
                 let path = self.files[index].clone();
                 let directory = if !self.sketches && (path.parent() == Some(context.library.home.as_path()) ||
                     std::env::current_dir().ok().as_deref() == path.parent()) { self.folder(context) }
                     else { path.parent().unwrap().to_path_buf() };
-                self.children.push(Box::new(FileActions::new(self.rect,path,directory,rq,context)));true
+                self.children.push(Box::new(FileActions::new(self.rect,point,path,directory,rq,context)));true
             },
-            Event::Close(ViewId::FileActions) => { self.rebuild(rq,context);true },
+            Event::Close(ViewId::FileActions) => { FileActions::close(self, rq); true },
             Event::FileChanged(_, ref new_path) => {
                 let was_selected = self.selected.is_some();
                 self.selected = None;self.reload(context);

@@ -1,5 +1,5 @@
 use crate::device::CURRENT_DEVICE;
-use crate::geom::{Rectangle, CornerSpec, BorderSpec};
+use crate::geom::{Point, Rectangle, CornerSpec, BorderSpec};
 use crate::font::{Fonts, font_from_style, NORMAL_STYLE};
 use super::{View, Event, Hub, Bus, Id, ID_FEEDER, RenderQueue, RenderData};
 use super::{THICKNESS_MEDIUM, BORDER_RADIUS_LARGE};
@@ -15,7 +15,9 @@ pub struct Button {
     rect: Rectangle,
     children: Vec<Box<dyn View>>,
     event: Event,
+    hold_event: Option<Box<dyn Fn(Point) -> Event>>,
     text: String,
+    value: Option<String>,
     active: bool,
     pub disabled: bool,
 }
@@ -27,10 +29,22 @@ impl Button {
             rect,
             children: Vec::new(),
             event,
+            hold_event: None,
             text,
+            value: None,
             active: false,
             disabled: false,
         }
+    }
+
+    pub fn with_value(mut self, value: String) -> Self {
+        self.value = Some(value);
+        self
+    }
+
+    pub fn with_hold_event(mut self, event: impl Fn(Point) -> Event + 'static) -> Self {
+        self.hold_event = Some(Box::new(event));
+        self
     }
 
     pub fn disabled(mut self, value: bool) -> Button {
@@ -63,6 +77,17 @@ impl View for Button {
                 }
                 true
             },
+            Event::Gesture(GestureEvent::HoldFingerShort(center, _))
+                if !self.disabled && self.rect.includes(center) => {
+                if let Some(event) = &self.hold_event {
+                    self.active = false;
+                    rq.add(RenderData::new(self.id, self.rect, UpdateMode::Gui));
+                    bus.push_back(event(center));
+                    true
+                } else {
+                    false
+                }
+            },
             _ => false,
         }
     }
@@ -89,15 +114,20 @@ impl View for Button {
         let font = font_from_style(fonts, &NORMAL_STYLE, dpi);
         let x_height = font.x_heights.0 as i32;
         let padding = font.em() as i32;
-        let max_width = self.rect.width() as i32 - padding;
+        let width = self.rect.width() as i32;
+        let y = self.rect.max.y - (self.rect.height() as i32 - x_height) / 2;
 
-        let plan = font.plan(&self.text, Some(max_width), None);
-
-        let dx = (self.rect.width() as i32 - plan.width) / 2;
-        let dy = (self.rect.height() as i32 - x_height) / 2;
-        let pt = pt!(self.rect.min.x + dx, self.rect.max.y - dy);
-
-        font.render(fb, foreground, &plan, pt);
+        if let Some(value) = &self.value {
+            let split = width / 2;
+            let title = font.plan(&self.text, Some(split - padding * 2), None);
+            let value = font.plan(value, Some(width - split - padding), None);
+            font.render(fb, foreground, &title, pt!(self.rect.min.x + padding, y));
+            font.render(fb, foreground, &value, pt!(self.rect.max.x - padding - value.width, y));
+        } else {
+            let plan = font.plan(&self.text, Some(width - padding), None);
+            let x = self.rect.min.x + (width - plan.width) / 2;
+            font.render(fb, foreground, &plan, pt!(x, y));
+        }
     }
 
     fn rect(&self) -> &Rectangle {

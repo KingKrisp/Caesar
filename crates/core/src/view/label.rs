@@ -3,7 +3,7 @@ use crate::font::{Fonts, font_from_style, NORMAL_STYLE};
 use super::{View, Event, Hub, Bus, Id, ID_FEEDER, RenderQueue, RenderData, Align};
 use crate::gesture::GestureEvent;
 use crate::framebuffer::{Framebuffer, UpdateMode};
-use crate::geom::Rectangle;
+use crate::geom::{Point, Rectangle};
 use crate::color::TEXT_NORMAL;
 use crate::context::Context;
 
@@ -14,7 +14,7 @@ pub struct Label {
     text: String,
     align: Align,
     event: Option<Event>,
-    hold_event: Option<Event>,
+    hold_event: Option<Box<dyn Fn(Point) -> Event>>,
 }
 
 impl Label {
@@ -35,9 +35,13 @@ impl Label {
         self
     }
 
-    pub fn hold_event(mut self, event: Option<Event>) -> Label {
-        self.hold_event = event;
+    pub fn hold_event(mut self, event: impl Fn(Point) -> Event + 'static) -> Label {
+        self.set_hold_event(event);
         self
+    }
+
+    pub(super) fn set_hold_event(&mut self, event: impl Fn(Point) -> Event + 'static) {
+        self.hold_event = Some(Box::new(event));
     }
 
     pub fn update(&mut self, text: &str, rq: &mut RenderQueue) {
@@ -58,8 +62,8 @@ impl View for Label {
                 true
             },
             Event::Gesture(GestureEvent::HoldFingerShort(center, _)) if self.rect.includes(center) => {
-                if let Some(event) = self.hold_event.clone() {
-                    bus.push_back(event);
+                if let Some(event) = &self.hold_event {
+                    bus.push_back(event(center));
                 }
                 true
             },

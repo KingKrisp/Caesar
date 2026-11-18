@@ -61,7 +61,7 @@ use crate::color::Color;
 use crate::document::{Location, TextLocation};
 use crate::settings::{ButtonScheme, FirstColumn, SecondColumn, RotationLock};
 use crate::metadata::{Info, ZoomMode, ScrollMode, SortMethod, TextAlign, SimpleStatus, PageScheme, Margin};
-use crate::geom::{LinearDir, CycleDir, Rectangle, Boundary};
+use crate::geom::{LinearDir, CycleDir, Point, Rectangle, Boundary};
 use crate::framebuffer::{Framebuffer, UpdateMode};
 use crate::input::{DeviceEvent, FingerStatus};
 use crate::gesture::GestureEvent;
@@ -586,8 +586,8 @@ pub enum EntryId {
     TakeScreenshot,
     GalleryFolder(bool),
     GalleryOpen(usize),
-    GalleryFile(usize),
-    NoteFile(usize),
+    GalleryFile(usize, Point),
+    NoteFile(usize, Point),
     FileRename,
     FileRenameSave,
     FileDelete,
@@ -600,6 +600,8 @@ pub enum EntryId {
     NoteItalic,
     NotePreview,
     SettingsSection(u8),
+    SettingsGroup(usize),
+    SettingsActions(usize),
     SettingsChoose(usize),
     SettingsApply(usize),
     Reboot,

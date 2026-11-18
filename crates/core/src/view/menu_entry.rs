@@ -1,9 +1,9 @@
 use std::mem;
 use crate::device::CURRENT_DEVICE;
 use crate::framebuffer::{Framebuffer, UpdateMode};
-use crate::geom::{Rectangle, CornerSpec};
+use crate::geom::{Rectangle, CornerSpec, CycleDir};
 use super::{View, Event, Hub, Bus, Id, ID_FEEDER, RenderQueue, RenderData, EntryKind};
-use super::icon::ICONS_PIXMAPS;
+use super::icon::{Icon, ICONS_PIXMAPS};
 use crate::input::{DeviceEvent, FingerStatus};
 use crate::gesture::GestureEvent;
 use crate::font::{Fonts, font_from_style, NORMAL_STYLE, SPECIAL_STYLE};
@@ -157,9 +157,8 @@ impl View for MenuEntry {
             EntryKind::CheckBox(_, _, value) if value => ("check_mark", 0),
             EntryKind::RadioButton(_, _, value) if value => ("bullet", 0),
             EntryKind::Message(_, Some(ref name)) => (name.as_str(), 0),
-            EntryKind::SubMenu(..) |
-            EntryKind::More(..) => ("angle-right-small",
-                                    self.rect.width() as i32 - padding / 2),
+            EntryKind::SubMenu(..) => ("angle-right-small", self.rect.width() as i32 - padding / 2),
+            EntryKind::More(..) => (Icon::navigation_name(CycleDir::Next), self.rect.width() as i32 - padding / 2),
             _ => ("", 0),
         };
 

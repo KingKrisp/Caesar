@@ -192,9 +192,9 @@ impl DirectoriesBar {
         let mut page = Page::default();
 
         if start_index > 0 {
-            let pixmap = ICONS_PIXMAPS.get("angle-left-small").unwrap();
+            let pixmap = ICONS_PIXMAPS.get(Icon::navigation_name(CycleDir::Previous)).unwrap();
             line.width += pixmap.width as i32 + padding;
-            line.items.push(Item::Icon { name: "angle-left-small",
+            line.items.push(Item::Icon { name: Icon::navigation_name(CycleDir::Previous),
                                          width: pixmap.width as i32 });
         }
 
@@ -258,7 +258,7 @@ impl DirectoriesBar {
         if end_index < directories.len() {
 
             if let Some(mut line) = page.lines.pop() {
-                let pixmap = ICONS_PIXMAPS.get("angle-right-small").unwrap();
+                let pixmap = ICONS_PIXMAPS.get(Icon::navigation_name(CycleDir::Next)).unwrap();
                 line.width += pixmap.width as i32 + padding;
 
                 if line.labels_count > 1 {
@@ -281,7 +281,7 @@ impl DirectoriesBar {
                     line.width = max_line_width;
                 }
 
-                line.items.push(Item::Icon { name: "angle-right-small",
+                line.items.push(Item::Icon { name: Icon::navigation_name(CycleDir::Next),
                                              width: pixmap.width as i32 });
                 page.lines.push(line);
             }

@@ -32,7 +32,7 @@ use plato_core::view::sketch::Sketch;
 use plato_core::view::gallery::Gallery;
 use plato_core::view::notes::Notes;
 use plato_core::view::preferences::Preferences;
-use plato_core::settings::controls::{Action, Binding, multitap_action};
+use plato_core::settings::controls::{Binding, multitap_action};
 use plato_core::view::common::system_action;
 use plato_core::view::touch_events::TouchEvents;
 use plato_core::view::rotation_values::RotationValues;
@@ -429,8 +429,8 @@ fn main() -> Result<(), Error> {
                     }
                 },
                 Event::Device(DeviceEvent::Button { code: ButtonCode::Light, status: ButtonStatus::Pressed, .. }) => {
-                    let action = context.settings.controls.action(Binding::GlobalLight);
-                    system_action(if action == Action::Default { Action::ToggleFrontlight } else { action }, view.id(), &tx, &mut rq, &mut context);
+                    let action = context.settings.controls.global_action(Binding::GlobalLight);
+                    system_action(action, view.id(), &tx, &mut rq, &mut context);
                 },
                 Event::Open(info) => {
                     let rotation = context.display.rotation;

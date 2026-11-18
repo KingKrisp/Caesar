@@ -68,8 +68,8 @@ impl Preference {
             NavigationBar => &["Show folders for browsing your library."],
             StripWidth => &["Width of the touch areas along the screen edges.", "Measured as a share of the screen's shorter side."],
             CornerWidth => &["Size of the triangular touch areas in the corners.", "Measured as a share of the screen's shorter side."],
-            Bind(binding) if binding.is_global() => &["Choose the shortcut's action throughout the app."],
-            Bind(_) => &["Choose what this gesture or button does while reading."],
+            Bind(binding) if binding.is_global() => &["Applies throughout Caesar."],
+            Bind(_) => &[],
             ResetBindings => &["Restore the original reading and global shortcut actions."],
         }
     }

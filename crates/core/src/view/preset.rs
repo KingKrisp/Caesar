@@ -1,5 +1,5 @@
 use crate::device::CURRENT_DEVICE;
-use crate::geom::{Rectangle, CornerSpec, CycleDir};
+use crate::geom::{Rectangle, CornerSpec};
 use crate::font::{Fonts, font_from_style, NORMAL_STYLE};
 use super::{View, Event, Hub, Bus, Id, ID_FEEDER, RenderQueue, RenderData};
 use super::BORDER_RADIUS_MEDIUM;
@@ -14,22 +14,19 @@ pub struct Preset {
     id: Id,
     rect: Rectangle,
     children: Vec<Box<dyn View>>,
-    kind: PresetKind,
+    name: String,
+    index: usize,
     active: bool,
 }
 
-pub enum PresetKind {
-    Normal(String, usize),
-    Page(CycleDir),
-}
-
 impl Preset {
-    pub fn new(rect: Rectangle, kind: PresetKind) -> Preset {
+    pub fn new(rect: Rectangle, name: String, index: usize) -> Preset {
         Preset {
             id: ID_FEEDER.next(),
             rect,
             children: Vec::new(),
-            kind,
+            name,
+            index,
             active: false,
         }
     }
@@ -54,16 +51,11 @@ impl View for Preset {
                 }
             },
             Event::Gesture(GestureEvent::Tap(center)) if self.rect.includes(center) => {
-                match self.kind {
-                    PresetKind::Normal(_, index) => bus.push_back(Event::LoadPreset(index)),
-                    PresetKind::Page(dir) => bus.push_back(Event::Page(dir)),
-                }
+                bus.push_back(Event::LoadPreset(self.index));
                 true
             },
             Event::Gesture(GestureEvent::HoldFingerShort(center, ..)) if self.rect.includes(center) => {
-                if let PresetKind::Normal(_, index) = self.kind {
-                    bus.push_back(Event::TogglePresetMenu(self.rect, index)); 
-                }
+                bus.push_back(Event::TogglePresetMenu(self.rect, self.index));
                 true
             },
             _ => false,
@@ -86,12 +78,7 @@ impl View for Preset {
         let padding = font.em() as i32;
         let max_width = self.rect.width() as i32 - padding;
 
-        let name = match self.kind {
-            PresetKind::Normal(ref text, _) => text,
-            _ => "…",
-        };
-
-        let plan = font.plan(name, Some(max_width), None);
+        let plan = font.plan(&self.name, Some(max_width), None);
 
         let dx = (self.rect.width() as i32 - plan.width) / 2;
         let dy = (self.rect.height() as i32 - x_height) / 2;

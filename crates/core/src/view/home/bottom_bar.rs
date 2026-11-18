@@ -32,9 +32,7 @@ impl BottomBar {
             let prev_filler = Filler::new(prev_rect, WHITE);
             children.push(Box::new(prev_filler) as Box<dyn View>);
         } else {
-            let prev_icon = Icon::new("arrow-left",
-                                      prev_rect,
-                                      Event::Page(CycleDir::Previous));
+            let prev_icon = Icon::navigation(prev_rect, CycleDir::Previous, Event::Page);
             children.push(Box::new(prev_icon) as Box<dyn View>);
         }
 
@@ -59,9 +57,7 @@ impl BottomBar {
             let next_filler = Filler::new(next_rect, WHITE);
             children.push(Box::new(next_filler) as Box<dyn View>);
         } else {
-            let next_icon = Icon::new("arrow-right",
-                                      rect![rect.max - side, rect.max],
-                                      Event::Page(CycleDir::Next));
+            let next_icon = Icon::navigation(rect![rect.max - side, rect.max], CycleDir::Next, Event::Page);
             children.push(Box::new(next_icon) as Box<dyn View>);
         }
 
@@ -94,9 +90,7 @@ impl BottomBar {
                 let prev_filler = Filler::new(prev_rect, WHITE);
                 self.children[index] = Box::new(prev_filler) as Box<dyn View>;
             } else {
-                let prev_icon = Icon::new("arrow-left",
-                                          prev_rect,
-                                          Event::Page(CycleDir::Previous));
+                let prev_icon = Icon::navigation(prev_rect, CycleDir::Previous, Event::Page);
                 self.children[index] = Box::new(prev_icon) as Box<dyn View>;
             }
             self.is_prev_disabled = is_prev_disabled;
@@ -112,9 +106,7 @@ impl BottomBar {
                 let next_filler = Filler::new(next_rect, WHITE);
                 self.children[index] = Box::new(next_filler) as Box<dyn View>;
             } else {
-                let next_icon = Icon::new("arrow-right",
-                                          next_rect,
-                                          Event::Page(CycleDir::Next));
+                let next_icon = Icon::navigation(next_rect, CycleDir::Next, Event::Page);
                 self.children[index] = Box::new(next_icon) as Box<dyn View>;
             }
             self.is_next_disabled = is_next_disabled;

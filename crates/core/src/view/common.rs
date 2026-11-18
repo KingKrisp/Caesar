@@ -3,8 +3,10 @@ use chrono::Local;
 use crate::device::CURRENT_DEVICE;
 use crate::settings::{ButtonScheme, RotationLock};
 use crate::framebuffer::UpdateMode;
-use crate::geom::{Point, Rectangle};
-use super::{View, Event, RenderQueue, RenderData, ViewId, AppCmd, EntryId, EntryKind};
+use crate::geom::{CycleDir, Point, Rectangle};
+use super::{Align, View, Event, RenderQueue, RenderData, ViewId, AppCmd, EntryId, EntryKind};
+use super::icon::Icon;
+use super::label::Label;
 use super::menu::{Menu, MenuKind};
 use super::notification::Notification;
 use crate::context::Context;
@@ -29,6 +31,24 @@ pub fn system_action(action: crate::settings::controls::Action, id: super::Id, h
     };
     hub.send(event).ok();
     true
+}
+
+pub fn add_pagination(children: &mut Vec<Box<dyn View>>, rect: Rectangle, page: usize, count: usize) {
+    if count < 2 {
+        return;
+    }
+    let side = rect.height() as i32;
+    if page > 0 {
+        children.push(Box::new(Icon::navigation(rect![rect.min, rect.min + side],
+            CycleDir::Previous, Event::Page).without_page_hold()));
+    }
+    children.push(Box::new(Label::new(
+        rect![rect.min.x + side, rect.min.y, rect.max.x - side, rect.max.y],
+        format!("{} / {}", page + 1, count), Align::Center)));
+    if page + 1 < count {
+        children.push(Box::new(Icon::navigation(rect![rect.max - side, rect.max],
+            CycleDir::Next, Event::Page).without_page_hold()));
+    }
 }
 
 pub fn shift(view: &mut dyn View, delta: Point) {
@@ -111,9 +131,6 @@ pub fn toggle_main_menu(view: &mut dyn View, rect: Rectangle, enable: Option<boo
                                            EntryId::Launch(AppCmd::Gallery)),
                         EntryKind::Command("Notes".to_string(),
                                            EntryId::Launch(AppCmd::Notes)),
-                        EntryKind::Command("Settings".to_string(),
-                                           EntryId::Launch(AppCmd::Settings)),
-                        EntryKind::Separator,
                         EntryKind::Command("Touch Events".to_string(),
                                            EntryId::Launch(AppCmd::TouchEvents)),
                         EntryKind::Command("Rotation Values".to_string(),

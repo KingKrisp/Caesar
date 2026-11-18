@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use super::{BottomRightGestureAction, EastStripAction, Settings, SouthEastCornerAction,
+            SouthStripAction, WestStripAction};
 use serde::{Serialize, Deserialize};
 use crate::geom::{Axis, DiagDir, Dir, Rectangle, Region};
 use crate::gesture::GestureEvent;
@@ -40,10 +42,10 @@ labelled_enum!(Binding {
     PinchHorizontal => "Pinch horizontally", PinchVertical => "Pinch vertically", PinchDiagonal => "Pinch diagonally",
     SpreadHorizontal => "Spread horizontally", SpreadVertical => "Spread vertically", SpreadDiagonal => "Spread diagonally",
     Rotate => "Rotate gesture", Cross => "Cross gesture", Diamond => "Diamond gesture",
-    Backward => "Back page button", Forward => "Forward page button",
-    HoldBackward => "Hold back page button", HoldForward => "Hold forward page button",
-    GlobalRefresh => "Global: two-finger SW + NE", GlobalScreenshot => "Global: two-finger NW + SE",
-    GlobalLight => "Global: light button"
+    Backward => "Previous page button", Forward => "Forward page button",
+    HoldBackward => "Hold previous page button", HoldForward => "Hold forward page button",
+    GlobalRefresh => "Bottom-left + top-right", GlobalScreenshot => "Top-left + bottom-right",
+    GlobalLight => "Light button (if present)"
 });
 
 labelled_enum!(Action {
@@ -51,15 +53,87 @@ labelled_enum!(Action {
     PreviousChapter => "Previous chapter", NextChapter => "Next chapter", FirstPage => "First page",
     LastPage => "Last visited page", GoToPage => "Go to page", TableOfContents => "Table of contents",
     ToggleBookmark => "Toggle bookmark", PreviousBookmark => "Previous bookmark", NextBookmark => "Next bookmark",
-    PreviousAnnotation => "Previous annotation", NextAnnotation => "Next annotation", ToggleBars => "Show / hide reading controls",
+    PreviousAnnotation => "Previous annotation", NextAnnotation => "Next annotation", ToggleBars => "Show or hide controls",
     Search => "Search book", ToggleFrontlight => "Toggle frontlight", ToggleInverted => "Toggle dark mode",
-    ToggleDithered => "Toggle dithering", Refresh => "Full screen refresh", Screenshot => "Take screenshot",
+    ToggleDithered => "Toggle dithering", Refresh => "Refresh screen", Screenshot => "Take screenshot",
     Settings => "Open Settings", Notes => "Open Notes", Gallery => "Open Gallery", Back => "Back"
 });
 
 impl Binding {
     pub fn is_global(self) -> bool {
         matches!(self, Self::GlobalRefresh | Self::GlobalScreenshot | Self::GlobalLight)
+    }
+
+    pub fn default_label(self, settings: &Settings) -> &'static str {
+        use Binding::*;
+        let reader = &settings.reader;
+        match self {
+            TapNorthWest => Action::LastPage.label(),
+            TapNorth | TapCenter => Action::ToggleBars.label(),
+            TapNorthEast => Action::ToggleBookmark.label(),
+            TapWest => match reader.west_strip {
+                WestStripAction::PreviousPage => Action::PreviousPage.label(),
+                WestStripAction::NextPage => Action::NextPage.label(),
+                WestStripAction::None => "No action",
+            },
+            TapEast => match reader.east_strip {
+                EastStripAction::PreviousPage => Action::PreviousPage.label(),
+                EastStripAction::NextPage => Action::NextPage.label(),
+                EastStripAction::None => "No action",
+            },
+            TapSouthWest => Action::TableOfContents.label(),
+            TapSouth => match reader.south_strip {
+                SouthStripAction::ToggleBars => Action::ToggleBars.label(),
+                SouthStripAction::NextPage => Action::NextPage.label(),
+            },
+            TapSouthEast => match reader.south_east_corner {
+                SouthEastCornerAction::NextPage => Action::NextPage.label(),
+                SouthEastCornerAction::GoToPage => Action::GoToPage.label(),
+            },
+            SwipeWest => Action::NextPage.label(),
+            SwipeEast => Action::PreviousPage.label(),
+            SwipeNorth | SwipeSouth => "Scroll vertically",
+            SlantedNorthWest | SlantedNorthEast | SlantedSouthWest | SlantedSouthEast => "Pan when zoomed",
+            HoldShort => "Select text",
+            HoldLong => "Look up selected text",
+            ArrowWest | HoldBackward => Action::PreviousChapter.label(),
+            ArrowEast | HoldForward => Action::NextChapter.label(),
+            ArrowNorth => "Search backward",
+            ArrowSouth => "Search forward",
+            CornerNorthWest => Action::PreviousBookmark.label(),
+            CornerNorthEast => Action::NextBookmark.label(),
+            CornerSouthWest if settings.frontlight_presets.len() > 1 => "Apply a light preset",
+            CornerSouthWest => Action::ToggleFrontlight.label(),
+            CornerSouthEast => match reader.bottom_right_gesture {
+                BottomRightGestureAction::ToggleDithered => Action::ToggleDithered.label(),
+                BottomRightGestureAction::ToggleInverted => Action::ToggleInverted.label(),
+            },
+            MultiCornerNorthWest => Action::PreviousAnnotation.label(),
+            MultiCornerNorthEast => Action::NextAnnotation.label(),
+            PinchHorizontal => "Fit to page",
+            SpreadHorizontal => "Fit to width",
+            PinchVertical => "Scroll by page",
+            SpreadVertical => "Scroll by screen",
+            PinchDiagonal | SpreadDiagonal => "Zoom page",
+            Rotate => "Rotate screen",
+            Cross => Action::Back.label(),
+            Diamond => Action::ToggleBars.label(),
+            Backward => Action::PreviousPage.label(),
+            Forward => Action::NextPage.label(),
+            GlobalRefresh | GlobalScreenshot | GlobalLight => self.global_default().label(),
+            MultiSwipeWest | MultiSwipeEast | MultiSwipeNorth | MultiSwipeSouth |
+            MultiArrowWest | MultiArrowEast | MultiArrowNorth | MultiArrowSouth |
+            MultiCornerSouthWest | MultiCornerSouthEast => "No action",
+        }
+    }
+
+    fn global_default(self) -> Action {
+        match self {
+            Self::GlobalRefresh => Action::Refresh,
+            Self::GlobalScreenshot => Action::Screenshot,
+            Self::GlobalLight => Action::ToggleFrontlight,
+            _ => Action::Disabled,
+        }
     }
 }
 
@@ -80,6 +154,14 @@ pub struct Controls {
 impl Controls {
     pub fn action(&self, binding: Binding) -> Action {
         self.bindings.get(&binding).copied().unwrap_or(Action::Default)
+    }
+
+    pub fn global_action(&self, binding: Binding) -> Action {
+        match self.action(binding) {
+            Action::Default => binding.global_default(),
+            action if action.is_global() && binding.is_global() => action,
+            _ => Action::Disabled,
+        }
     }
 
     pub fn set(&mut self, binding: Binding, action: Action) -> bool {
@@ -150,14 +232,13 @@ pub fn multitap_action(mut points: [crate::geom::Point; 2], rect: Rectangle, set
     }
     if points[0].x > points[1].x { points.swap(0, 1); }
     let region = |point| Region::from_point(point, rect, settings.reader.strip_width, settings.reader.corner_width);
-    let (binding, default) = match (region(points[0]), region(points[1])) {
+    let binding = match (region(points[0]), region(points[1])) {
         // A fixed recovery shortcut remains available even if all reader bindings are disabled.
-        (Region::Corner(DiagDir::SouthWest), Region::Corner(DiagDir::NorthEast)) => (Binding::GlobalRefresh, Action::Refresh),
-        (Region::Corner(DiagDir::NorthWest), Region::Corner(DiagDir::SouthEast)) => (Binding::GlobalScreenshot, Action::Screenshot),
+        (Region::Corner(DiagDir::SouthWest), Region::Corner(DiagDir::NorthEast)) => Binding::GlobalRefresh,
+        (Region::Corner(DiagDir::NorthWest), Region::Corner(DiagDir::SouthEast)) => Binding::GlobalScreenshot,
         _ => return None,
     };
-    let action = settings.controls.action(binding);
-    Some(if action == Action::Default { default } else if action.is_global() { action } else { Action::Disabled })
+    Some(settings.controls.global_action(binding))
 }
 
 #[cfg(test)]

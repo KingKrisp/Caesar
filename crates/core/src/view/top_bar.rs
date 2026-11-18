@@ -6,7 +6,7 @@ use crate::view::icon::Icon;
 use crate::view::clock::Clock;
 use crate::view::battery::Battery;
 use crate::view::label::Label;
-use crate::geom::{Rectangle};
+use crate::geom::{Point, Rectangle};
 use crate::font::Fonts;
 use crate::context::Context;
 
@@ -69,6 +69,11 @@ impl TopBar {
             rect,
             children,
         }
+    }
+
+    pub fn with_title_hold_event(mut self, event: impl Fn(Point) -> Event + 'static) -> Self {
+        self.children[1].downcast_mut::<Label>().unwrap().set_hold_event(event);
+        self
     }
 
     pub fn update_root_icon(&mut self, name: &str, rq: &mut RenderQueue) {

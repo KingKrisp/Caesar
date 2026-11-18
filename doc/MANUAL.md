@@ -178,10 +178,10 @@ You can go back to the previous view by tapping the top-left *back arrow*.
 
 ## Settings
 
-Open *Settings* directly from the main menu or from *Applications*. Settings save
-immediately. Back returns from a choice to its section, then to the Settings home,
-then to the previous application. Use Previous/Next or horizontal swipes for lists
-with multiple pages.
+Open *Settings* from the main menu. Settings save immediately. Tap a setting
+with two options to switch between them directly. Use Back to go up one level
+or return to the previous application from Settings home. Use the left and right
+arrows or horizontal swipes for lists with multiple pages.
 
 The app includes display and frontlight controls, warmth on supported devices,
 orientation, refresh intervals, sleep and power-off timers, sleep cover, USB
@@ -190,15 +190,11 @@ and import settings, and device/storage information. It does not implement Kobo
 accounts, store/sync, firmware updates, or factory reset. Reading defaults apply
 when opening a book; that book's saved settings still take priority.
 
-*Reader bindings* configures all nine tap regions, swipes, diagonal and two-finger
-gestures, holds, arrows/corners, pinches/spreads, rotation, cross/diamond gestures,
-and page buttons. Choose *Default* to preserve Plato's existing context-sensitive
-behavior, *Disabled* to consume the input without an action, or another action.
-Choices include page/chapter navigation, bookmarks, annotations, contents, search,
-reading controls, display toggles, screenshots, and launching Caesar apps. Existing
-zoom/selection behavior is preserved for Default bindings. Keyboard keys, visible
-buttons/menus, selection adjustment, and the power button retain their normal
-behavior. These are reading bindings, not replacements for each app's own controls.
+*Reading controls* groups bindings by gesture, with a separate page-button group
+on models with those buttons. Each row shows its current action. Choose the
+action marked *(default)* to restore the built-in behavior, *Disabled* to turn
+the binding off, or browse the action categories to assign something else.
+Built-in gestures can respond differently during zoom, search, or text selection.
 
 *Global shortcuts* remaps or disables the diagonal two-finger refresh/screenshot
 shortcuts and the light button, if the device has one. **A two-finger tap near the
@@ -221,7 +217,8 @@ Open *Applications → Gallery* to browse screenshots and saved sketches. Choose
 screen. *Previous* and *Next* (or horizontal swipes and page-turn buttons) move
 between list pages or images. The back arrow returns from an image to its list,
 and from the list to the previous application. Images are shown newest first.
-Use *Refresh* to pick up files saved while the gallery was open.
+Use *Refresh* to pick up files saved while the gallery was open. Touch and hold a
+filename or an open image to open the *Rename* and *Delete* popup at that spot.
 
 New screenshots are saved in `Screenshots` inside the active library. Set the
 top-level `screenshot-path` in `Settings.toml` to choose another folder. Sketches
@@ -237,9 +234,10 @@ and can be skipped with *Next* or the back arrow.
 
 ## Notes
 
-Open *Applications → Notes* to see saved notes, newest first. Tap *+ New Note* to
-start writing, or tap a note to edit it. The first nonempty line supplies the title
-in the list; a heading such as `# Shopping list` works well.
+Open *Applications → Notes* to see saved notes, newest first. Tap *New Note* to
+start writing, or tap a note to edit it. A new note takes its title from the first
+nonempty line. A renamed note uses its filename. Touch and hold a note in the
+list or its title in the editor to open the *Rename* and *Delete* popup at that spot.
 
 The editor uses the on-screen keyboard. Return inserts a new line. Text wraps to
 the screen, tapping the text positions the cursor, and the keyboard arrows and

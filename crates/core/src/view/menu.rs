@@ -53,14 +53,14 @@ impl Menu {
 
         let sep_color = if context.fb.monochrome() { SEPARATOR_STRONG } else { SEPARATOR_NORMAL };
         let font = font_from_style(&mut context.fonts, &NORMAL_STYLE, dpi);
-        let entry_height = font.x_heights.0 as i32 * 5;
+        let x_height = font.x_heights.0 as i32;
         let padding = 4 * font.em() as i32;
 
         let north_space = target.min.y;
         let south_space = height as i32 - target.max.y;
         let center = target.center();
 
-        let (dir, y_start): (i32, i32) = if kind == MenuKind::SubMenu {
+        let (mut dir, mut y_start): (i32, i32) = if kind == MenuKind::SubMenu {
             if north_space < south_space {
                 (1, target.min.y - border_thickness)
             } else {
@@ -77,20 +77,36 @@ impl Menu {
         let top_min = small_height + big_half(thickness);
         let bottom_max = height as i32 - small_height - small_half(thickness);
 
-        let usable_space = if dir.is_positive() {
-            bottom_max - y_start
-        } else {
-            y_start - top_min
-        };
-
         let border_space = if kind == MenuKind::DropDown {
             border_thickness
         } else {
             2 * border_thickness
         };
 
-        let max_entries = ((usable_space - border_space) / entry_height) as usize;
+        let mut usable_space = if dir.is_positive() {
+            bottom_max - y_start
+        } else {
+            y_start - top_min
+        };
+
         let total_entries = entries.iter().filter(|e| !e.is_separator()).count();
+        let mut entry_height = x_height * 5;
+        if view_id == ViewId::MainMenu {
+            let fitted_height = (usable_space - border_space) / total_entries as i32;
+            entry_height = fitted_height.clamp(3 * x_height, entry_height);
+        }
+
+        let full_height = total_entries as i32 * entry_height + border_space;
+        if kind == MenuKind::SubMenu && full_height <= bottom_max - top_min {
+            if dir.is_negative() {
+                y_start -= full_height;
+                dir = 1;
+            }
+            y_start = y_start.clamp(top_min, bottom_max - full_height);
+            usable_space = bottom_max - y_start;
+        }
+
+        let max_entries = ((usable_space - border_space) / entry_height).max(1) as usize;
 
         if total_entries > max_entries {
             let mut kind_counts = [0, 0];

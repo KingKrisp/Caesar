@@ -6,6 +6,7 @@ use crate::font::Fonts;
 use crate::framebuffer::{Framebuffer, UpdateMode};
 use crate::geom::{CycleDir, Dir, Rectangle};
 use crate::gesture::GestureEvent;
+use crate::input::{ButtonCode, ButtonStatus, DeviceEvent};
 use crate::settings::{SETTINGS_PATH, RotationLock};
 use crate::settings::controls::{Action, Binding};
 use crate::settings::preferences::{self, Preference, Value};
@@ -15,19 +16,66 @@ use super::button::Button;
 use super::label::Label;
 use super::notification::Notification;
 use super::top_bar::TopBar;
-use super::common::{toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
+use super::common::{add_pagination, toggle_main_menu, toggle_battery_menu, toggle_clock_menu};
 
 const SECTIONS: &[&str] = &["Display and light", "Sleep, clock and USB", "Reading defaults", "Library",
-                           "Reading gestures", "Global shortcuts", "Device and storage"];
+                           "Reading controls", "Global shortcuts", "Device and storage"];
+
+use Binding::*;
+const CONTROL_GROUPS: &[(&str, &[Binding])] = &[
+    ("Taps", &[TapNorthWest, TapNorth, TapNorthEast, TapWest, TapCenter, TapEast,
+               TapSouthWest, TapSouth, TapSouthEast]),
+    ("Swipes", &[SwipeWest, SwipeEast, SwipeNorth, SwipeSouth, SlantedNorthWest,
+                 SlantedNorthEast, SlantedSouthWest, SlantedSouthEast]),
+    ("Hold text", &[HoldShort, HoldLong]),
+    ("Drawn gestures", &[ArrowWest, ArrowEast, ArrowNorth, ArrowSouth, CornerNorthWest,
+                         CornerNorthEast, CornerSouthWest, CornerSouthEast, Cross, Diamond]),
+    ("Two-finger swipes & arrows", &[MultiSwipeWest, MultiSwipeEast, MultiSwipeNorth, MultiSwipeSouth,
+                                      MultiArrowWest, MultiArrowEast, MultiArrowNorth, MultiArrowSouth]),
+    ("Two-finger corners & rotation", &[MultiCornerNorthWest, MultiCornerNorthEast,
+                                          MultiCornerSouthWest, MultiCornerSouthEast, Rotate]),
+    ("Pinch and spread", &[PinchHorizontal, PinchVertical, PinchDiagonal, SpreadHorizontal,
+                           SpreadVertical, SpreadDiagonal]),
+    ("Page buttons", &[Backward, Forward, HoldBackward, HoldForward]),
+    ("Touch zones", &[]),
+];
+
+const ACTION_GROUPS: &[(&str, &[Action])] = &[
+    ("Pages and chapters", &[Action::PreviousPage, Action::NextPage, Action::PreviousChapter,
+                             Action::NextChapter, Action::FirstPage, Action::LastPage,
+                             Action::GoToPage, Action::TableOfContents]),
+    ("Bookmarks and annotations", &[Action::ToggleBookmark, Action::PreviousBookmark,
+                                     Action::NextBookmark, Action::PreviousAnnotation, Action::NextAnnotation]),
+    ("Reading and display", &[Action::ToggleBars, Action::Search, Action::ToggleFrontlight,
+                              Action::ToggleInverted, Action::ToggleDithered, Action::Refresh]),
+    ("Apps and shortcuts", &[Action::Settings, Action::Notes, Action::Gallery, Action::Screenshot, Action::Back]),
+];
+
+struct Row {
+    title: String,
+    event: Option<Event>,
+    value: Option<String>,
+}
+
+impl Row {
+    fn select(title: impl Into<String>, entry: EntryId) -> Self {
+        Self { title: title.into(), event: Some(Event::Select(entry)), value: None }
+    }
+}
 
 pub struct Preferences {
     id: Id,
     rect: Rectangle,
     children: Vec<Box<dyn View>>,
     section: Option<u8>,
+    group: Option<usize>,
     choice: Option<Preference>,
+    action_group: Option<usize>,
     page: usize,
+    pages: usize,
+    section_page: usize,
     return_page: usize,
+    choice_page: usize,
 }
 
 fn numbers(values: &[f32]) -> Vec<(String, Value)> {
@@ -43,7 +91,8 @@ impl Preferences {
         if context.settings.frontlight { context.settings.frontlight_levels = context.frontlight.levels(); }
         context.settings.inverted = context.fb.inverted();
         let mut view = Self { id: ID_FEEDER.next(), rect, children: Vec::new(),
-            section: None, choice: None, page: 0, return_page: 0 };
+            section: None, group: None, choice: None, action_group: None,
+            page: 0, pages: 0, section_page: 0, return_page: 0, choice_page: 0 };
         view.rebuild(rq, context);
         view
     }
@@ -59,8 +108,11 @@ impl Preferences {
             Some(1) => vec![SleepCover, Sleep, PowerOff, AutoShare, TimeFormat, DateFormat, Keyboard],
             Some(2) => vec![FontFamily, FontSize, Margin, LineHeight, Alignment, IgnoreCss, Continuous],
             Some(3) => vec![Thumbnails, FirstColumn, SecondColumn, StartupImport, UsbImport, AddressBar, NavigationBar],
-            Some(4) => [StripWidth, CornerWidth, ResetBindings].into_iter()
-                .chain(Binding::ALL.iter().filter(|b| !b.is_global()).map(|b| Bind(*b))).collect(),
+            Some(4) => match self.group {
+                Some(i) if CONTROL_GROUPS[i].1.is_empty() => vec![StripWidth, CornerWidth],
+                Some(i) => CONTROL_GROUPS[i].1.iter().copied().map(Bind).collect(),
+                None => vec![ResetBindings],
+            },
             Some(5) => Binding::ALL.iter().filter(|b| b.is_global()).map(|b| Bind(*b)).collect(),
             _ => Vec::new(),
         }
@@ -94,19 +146,50 @@ impl Preferences {
             FirstColumn => texts(&["Title and author", "File name"]),
             SecondColumn => texts(&["Progress", "Year"]),
             StripWidth | CornerWidth => numbers(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]),
-            Bind(binding) => Action::ALL.iter().filter(|a| !binding.is_global() || a.is_global())
-                .map(|action| (action.label().to_string(), Value::Action(*action))).collect(),
+            Bind(binding) => {
+                let actions: Vec<_> = if binding.is_global() {
+                    Action::ALL.iter().copied().filter(|action| action.is_global()).collect()
+                } else if let Some(group) = self.action_group {
+                    ACTION_GROUPS[group].1.to_vec()
+                } else {
+                    vec![Action::Default, Action::Disabled]
+                };
+                actions.into_iter().map(|action| {
+                    let label = if action == Action::Default {
+                        format!("{} (default)", binding.default_label(&context.settings))
+                    } else {
+                        action.label().to_string()
+                    };
+                    (label, Value::Action(action))
+                }).collect()
+            },
             ResetBindings => texts(&["Restore"]),
         }
     }
 
-    fn rows(&self, context: &mut Context) -> Vec<(String, Option<Event>)> {
+    fn rows(&self, context: &mut Context) -> Vec<Row> {
         if let Some(preference) = self.choice {
             let current = preference.current(&context.settings);
-            return self.options(preference, context).into_iter().enumerate().map(|(index, (mut text, value))| {
-                if matches!(value, Value::Number(_)) { text = preference.value_label(&value); }
-                (format!("{}{}", if value == current { "✓ " } else { "" }, text), Some(Event::Select(EntryId::SettingsApply(index))))
-            }).collect();
+            let mut rows: Vec<_> = self.options(preference, context).into_iter().enumerate()
+                .map(|(index, (mut text, value))| {
+                    if matches!(value, Value::Number(_)) {
+                        text = preference.value_label(&value);
+                    }
+                    if value == current {
+                        text = format!("✓ {}", text);
+                    }
+                    Row::select(text, EntryId::SettingsApply(index))
+                }).collect();
+            if matches!(preference, Preference::Bind(binding) if !binding.is_global()) && self.action_group.is_none() {
+                if let Value::Action(action) = current {
+                    if !matches!(action, Action::Default | Action::Disabled) {
+                        rows.insert(0, Row { title: format!("Current action: {}", action.label()), event: None, value: None });
+                    }
+                }
+                rows.extend(ACTION_GROUPS.iter().enumerate()
+                    .map(|(i, (name, _))| Row::select(*name, EntryId::SettingsActions(i))));
+            }
+            return rows;
         }
         if self.section == Some(6) {
             let mut info = vec![format!("Caesar {}", env!("CARGO_PKG_VERSION")),
@@ -119,74 +202,111 @@ impl Preferences {
                 info.insert(2, format!("Free library storage: {:.2} GiB", free));
             }
             if let Ok(capacity) = context.battery.capacity() { info.insert(2, format!("Battery: {:.0}%", capacity[0])); }
-            return info.into_iter().map(|text| (text, None)).collect();
+            return info.into_iter().map(|title| Row { title, event: None, value: None }).collect();
         }
         if self.section.is_none() {
-            return SECTIONS.iter().enumerate().map(|(i, name)| (name.to_string(), Some(Event::Select(EntryId::SettingsSection(i as u8))))).collect();
+            return SECTIONS.iter().enumerate()
+                .map(|(i, name)| Row::select(*name, EntryId::SettingsSection(i as u8))).collect();
         }
-        self.items().into_iter().enumerate().map(|(index, preference)| {
-            let current = preference.current(&context.settings);
-            let value = self.options(preference, context).into_iter().find(|(_, value)| *value == current)
-                .map_or_else(|| preference.value_label(&current), |(label, value)| {
-                    if matches!(value, Value::Number(_)) { preference.value_label(&value) } else { label }
+        let mut rows = Vec::new();
+        if self.section == Some(4) && self.group.is_none() {
+            rows.extend(CONTROL_GROUPS.iter().enumerate()
+                .filter(|(_, (_, bindings))| !bindings.contains(&Backward) || CURRENT_DEVICE.has_page_turn_buttons())
+                .map(|(i, (name, _))| Row::select(*name, EntryId::SettingsGroup(i))));
+        }
+        rows.extend(self.items().into_iter().enumerate().map(|(index, preference)| {
+            let mut row = Row::select(preference.label(), EntryId::SettingsChoose(index));
+            if preference != Preference::ResetBindings {
+                let current = preference.current(&context.settings);
+                row.value = Some(match (preference, &current) {
+                    (Preference::Bind(binding), Value::Action(Action::Default)) =>
+                        binding.default_label(&context.settings).to_string(),
+                    (Preference::Bind(_), _) => preference.value_label(&current),
+                    _ => self.options(preference, context).into_iter().find(|(_, value)| *value == current)
+                        .map_or_else(|| preference.value_label(&current), |(label, value)| {
+                            if matches!(value, Value::Number(_)) { preference.value_label(&value) } else { label }
+                        }),
                 });
-            (format!("{}: {}", preference.label(), value), Some(Event::Select(EntryId::SettingsChoose(index))))
-        }).collect()
+            }
+            row
+        }));
+        rows
     }
-
-    fn header_rows(&self) -> i32 {
-        if let Some(preference) = self.choice { 1 + preference.help().len() as i32 }
-        else if matches!(self.section, Some(2) | Some(4) | Some(5)) { 2 }
-        else { 1 }
-    }
-    fn per_page(&self) -> usize { (self.rect.height() as i32 / self.bar() - self.header_rows() - 1).max(1) as usize }
-    fn bar(&self) -> i32 { scale_by_dpi(SMALL_BAR_HEIGHT, CURRENT_DEVICE.dpi) as i32 }
 
     fn rebuild(&mut self, rq: &mut RenderQueue, context: &mut Context) {
         self.children.clear();
         let rect = self.rect;
-        let bar = self.bar();
-        let gap = (bar / 12).max(1);
-        let title = self.choice.map(|p| p.label()).unwrap_or_else(|| self.section.map_or("Settings", |s| SECTIONS[s as usize]));
+        let bar = scale_by_dpi(SMALL_BAR_HEIGHT, CURRENT_DEVICE.dpi) as i32;
+        let row_height = bar * 4 / 5;
+        let gap = (bar / 18).max(1);
+        let title = if let Some(group) = self.action_group {
+            ACTION_GROUPS[group].0
+        } else if let Some(preference) = self.choice {
+            preference.label()
+        } else if let Some(group) = self.group {
+            CONTROL_GROUPS[group].0
+        } else {
+            self.section.map_or("Settings", |s| SECTIONS[s as usize])
+        };
         self.children.push(Box::new(TopBar::new(rect![rect.min.x, rect.min.y, rect.max.x, rect.min.y + bar],
             Event::Back, title.to_string(), context)));
-        let descriptions: &[&str] = if let Some(preference) = self.choice { preference.help() }
-            else { match self.section {
-                Some(2) => &["New book defaults; saved book settings take priority."],
-                Some(4) | Some(5) => &["Two-finger center tap always opens Settings."],
+
+        let mut y = rect.min.y + bar;
+        let binding_title = [self.choice.map_or("", Preference::label)];
+        let descriptions: &[&str] = if self.action_group.is_some() {
+            &binding_title
+        } else if let Some(preference) = self.choice {
+            preference.help()
+        } else {
+            match (self.section, self.group) {
+                (Some(2), _) => &["Saved book settings take priority over these defaults."],
+                (Some(5), _) => &["Tap opposite corners with two fingers.",
+                                  "Two-finger center tap always opens Settings."],
                 _ => &[],
-            }};
-        for (line, text) in descriptions.iter().enumerate() {
-            let y = rect.min.y + (line as i32 + 1) * bar;
-            self.children.push(Box::new(Label::new(rect![rect.min.x,y,rect.max.x,y+bar],(*text).into(),Align::Center)));
+            }
+        };
+        for text in descriptions {
+            self.children.push(Box::new(Label::new(rect![rect.min.x, y, rect.max.x, y + row_height],
+                (*text).into(), Align::Center)));
+            y += row_height;
         }
+
         let rows = self.rows(context);
-        let pages = (rows.len() + self.per_page() - 1) / self.per_page();
-        self.page = self.page.min(pages.saturating_sub(1));
-        for (i, (text, event)) in rows.into_iter().skip(self.page * self.per_page()).take(self.per_page()).enumerate() {
-            let y = rect.min.y + (i as i32 + self.header_rows()) * bar;
-            let row = rect![rect.min.x + gap, y + gap, rect.max.x - gap, y + bar - gap];
-            self.children.push(match event {
-                Some(event) => Box::new(Button::new(row, event, text)) as Box<dyn View>,
-                None => Box::new(Label::new(row, text, Align::Center)) as Box<dyn View>,
+        let available = rect.max.y - y;
+        let per_page = if rows.len() <= (available / row_height).max(1) as usize {
+            rows.len().max(1)
+        } else {
+            ((available - bar) / row_height).max(1) as usize
+        };
+        self.pages = rows.len().div_ceil(per_page);
+        self.page = self.page.min(self.pages.saturating_sub(1));
+        for row in rows.into_iter().skip(self.page * per_page).take(per_page) {
+            let bounds = rect![rect.min.x + gap, y + gap, rect.max.x - gap, y + row_height - gap];
+            self.children.push(match row.event {
+                Some(event) => {
+                    let mut button = Button::new(bounds, event, row.title);
+                    if let Some(value) = row.value {
+                        button = button.with_value(value);
+                    }
+                    Box::new(button) as Box<dyn View>
+                },
+                None => Box::new(Label::new(bounds, row.title, Align::Center)) as Box<dyn View>,
             });
+            y += row_height;
         }
-        let third = rect.width() as i32 / 3;
-        for (text, dir, x, disabled) in [
-            ("Previous", CycleDir::Previous, rect.min.x, self.page == 0),
-            ("Next", CycleDir::Next, rect.max.x - third, self.page + 1 >= pages),
-        ] {
-            self.children.push(Box::new(Button::new(rect![x + gap, rect.max.y - bar + gap, x + third - gap, rect.max.y - gap],
-                Event::Page(dir), text.to_string()).disabled(disabled)));
-        }
-        self.children.push(Box::new(Label::new(rect![rect.min.x + third, rect.max.y - bar, rect.max.x - third, rect.max.y],
-            format!("{} / {}", if pages == 0 { 0 } else { self.page + 1 }, pages), Align::Center)));
+
+        add_pagination(&mut self.children,
+            rect![rect.min.x, rect.max.y - bar, rect.max.x, rect.max.y], self.page, self.pages);
         rq.add(RenderData::new(self.id, rect, UpdateMode::Full));
     }
 
     fn choose(&mut self, index: usize, hub: &Hub, rq: &mut RenderQueue, context: &mut Context) {
         let Some(preference) = self.choice else { return; };
         let Some((_, value)) = self.options(preference, context).into_iter().nth(index) else { return; };
+        self.apply_value(preference, value, hub, rq, context);
+    }
+
+    fn apply_value(&mut self, preference: Preference, value: Value, hub: &Hub, rq: &mut RenderQueue, context: &mut Context) {
         let mut settings = context.settings.clone();
         if settings.frontlight { settings.frontlight_levels = context.frontlight.levels(); }
         settings.inverted = context.fb.inverted();
@@ -210,15 +330,22 @@ impl Preferences {
             };
             if let Some(rotation) = rotation { hub.send(Event::Select(EntryId::Rotate(CURRENT_DEVICE.from_canonical(rotation)))).ok(); }
         }
-        self.choice = None; self.page = self.return_page;
+        if self.choice.take().is_some() {
+            self.action_group = None;
+            self.page = self.return_page;
+        }
         self.rebuild(rq, context);
     }
 
     fn turn(&mut self, dir: CycleDir, rq: &mut RenderQueue, context: &mut Context) {
-        let pages = (self.rows(context).len() + self.per_page() - 1) / self.per_page();
-        self.page = match dir { CycleDir::Previous => self.page.saturating_sub(1),
-                               CycleDir::Next => (self.page + 1).min(pages.saturating_sub(1)) };
-        self.rebuild(rq, context);
+        let page = match dir {
+            CycleDir::Previous => self.page.saturating_sub(1),
+            CycleDir::Next => (self.page + 1).min(self.pages.saturating_sub(1)),
+        };
+        if page != self.page {
+            self.page = page;
+            self.rebuild(rq, context);
+        }
     }
 }
 
@@ -226,22 +353,54 @@ impl View for Preferences {
     fn handle_event(&mut self, event: &Event, _hub: &Hub, _bus: &mut Bus, rq: &mut RenderQueue, context: &mut Context) -> bool {
         match *event {
             Event::Select(EntryId::SettingsSection(section)) if (section as usize) < SECTIONS.len() => {
-                self.section = Some(section); self.choice = None; self.page = 0; self.rebuild(rq, context); true
+                self.section = Some(section); self.group = None; self.choice = None; self.action_group = None;
+                self.page = 0; self.rebuild(rq, context); true
+            },
+            Event::Select(EntryId::SettingsGroup(group)) if self.section == Some(4) &&
+                self.group.is_none() && self.choice.is_none() &&
+                CONTROL_GROUPS.get(group).is_some_and(|(_, bindings)|
+                    !bindings.contains(&Backward) || CURRENT_DEVICE.has_page_turn_buttons()) => {
+                self.group = Some(group); self.section_page = self.page; self.page = 0; self.rebuild(rq, context); true
+            },
+            Event::Select(EntryId::SettingsActions(group)) if self.action_group.is_none() &&
+                matches!(self.choice, Some(Preference::Bind(binding)) if !binding.is_global()) &&
+                group < ACTION_GROUPS.len() => {
+                self.action_group = Some(group); self.choice_page = self.page; self.page = 0; self.rebuild(rq, context); true
             },
             Event::Select(EntryId::SettingsChoose(index)) if self.choice.is_none() => {
-                if let Some(preference) = self.items().get(index) {
-                    self.choice = Some(*preference); self.return_page = self.page; self.page = 0; self.rebuild(rq, context);
+                if let Some(preference) = self.items().get(index).copied() {
+                    let options = self.options(preference, context);
+                    // Reading bindings show two quick actions alongside the full action categories.
+                    if !matches!(preference, Preference::Bind(_)) && options.len() == 2 {
+                        let current = preference.current(&context.settings);
+                        let next = usize::from(options[0].1 == current);
+                        let (_, value) = options.into_iter().nth(next).unwrap();
+                        self.apply_value(preference, value, _hub, rq, context);
+                    } else {
+                        self.choice = Some(preference);
+                        self.return_page = self.page;
+                        self.page = 0;
+                        self.rebuild(rq, context);
+                    }
                 }
                 true
             },
             Event::Select(EntryId::SettingsApply(index)) => { self.choose(index, _hub, rq, context); true },
+            Event::Back if self.action_group.is_some() => {
+                self.action_group = None; self.page = self.choice_page; self.rebuild(rq, context); true
+            },
             Event::Back if self.choice.is_some() => {
                 self.choice = None; self.page = self.return_page; self.rebuild(rq, context); true
+            },
+            Event::Back if self.group.is_some() => {
+                self.group = None; self.page = self.section_page; self.rebuild(rq, context); true
             },
             Event::Back if self.section.is_some() => { self.section = None; self.page = 0; self.rebuild(rq, context); true },
             Event::Reseed => { self.rebuild(rq, context); true },
             Event::Page(dir) => { self.turn(dir, rq, context); true },
+            Event::Device(DeviceEvent::Button { code: ButtonCode::Forward, status: ButtonStatus::Pressed, .. }) |
             Event::Gesture(GestureEvent::Swipe { dir: Dir::West, .. }) => { self.turn(CycleDir::Next, rq, context); true },
+            Event::Device(DeviceEvent::Button { code: ButtonCode::Backward, status: ButtonStatus::Pressed, .. }) |
             Event::Gesture(GestureEvent::Swipe { dir: Dir::East, .. }) => { self.turn(CycleDir::Previous, rq, context); true },
             Event::ToggleNear(ViewId::MainMenu, rect) => { toggle_main_menu(self, rect, None, rq, context); true },
             Event::ToggleNear(ViewId::BatteryMenu, rect) => { toggle_battery_menu(self, rect, None, rq, context); true },
@@ -259,4 +418,21 @@ impl View for Preferences {
     fn children(&self) -> &Vec<Box<dyn View>> { &self.children }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn View>> { &mut self.children }
     fn id(&self) -> Id { self.id }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_keep_every_reading_binding_and_action_available_once() {
+        let mut bindings: Vec<_> = CONTROL_GROUPS.iter().flat_map(|(_, bindings)| bindings.iter().copied()).collect();
+        bindings.sort_unstable();
+        assert_eq!(bindings, Binding::ALL.iter().copied().filter(|b| !b.is_global()).collect::<Vec<_>>());
+
+        let mut actions: Vec<_> = ACTION_GROUPS.iter().flat_map(|(_, actions)| actions.iter().copied()).collect();
+        actions.extend([Action::Default, Action::Disabled]);
+        actions.sort_unstable();
+        assert_eq!(actions, Action::ALL);
+    }
 }

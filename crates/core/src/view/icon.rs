@@ -9,7 +9,7 @@ use crate::input::{DeviceEvent, FingerStatus};
 use crate::document::pdf::PdfOpener;
 use crate::color::{Color, TEXT_NORMAL, TEXT_INVERTED_HARD};
 use crate::unit::scale_by_dpi_raw;
-use crate::geom::{Rectangle, CornerSpec};
+use crate::geom::{Rectangle, CornerSpec, CycleDir};
 use crate::font::Fonts;
 use crate::context::Context;
 
@@ -47,6 +47,7 @@ pub struct Icon {
     corners: Option<CornerSpec>,
     event: Event,
     pub active: bool,
+    page_hold: bool,
 }
 
 impl Icon {
@@ -61,7 +62,24 @@ impl Icon {
             corners: None,
             event,
             active: false,
+            page_hold: true,
         }
+    }
+
+    pub fn navigation_name(dir: CycleDir) -> &'static str {
+        match dir {
+            CycleDir::Previous => "arrow-left",
+            CycleDir::Next => "arrow-right",
+        }
+    }
+
+    pub fn navigation(rect: Rectangle, dir: CycleDir, event: fn(CycleDir) -> Event) -> Self {
+        Self::new(Self::navigation_name(dir), rect, event(dir))
+    }
+
+    pub fn without_page_hold(mut self) -> Self {
+        self.page_hold = false;
+        self
     }
 
     pub fn background(mut self, background: Color) -> Icon {
@@ -104,7 +122,7 @@ impl View for Icon {
             },
             Event::Gesture(GestureEvent::HoldFingerShort(center, ..)) if self.rect.includes(center) => {
                 match self.event {
-                    Event::Page(dir) => bus.push_back(Event::Chapter(dir)),
+                    Event::Page(dir) if self.page_hold => bus.push_back(Event::Chapter(dir)),
                     Event::Show(ViewId::Frontlight) => {
                         hub.send(Event::ToggleFrontlight).ok();
                     },

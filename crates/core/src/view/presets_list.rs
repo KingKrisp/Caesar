@@ -3,7 +3,8 @@ use crate::geom::{Rectangle, Dir, CycleDir};
 use crate::font::{Fonts, font_from_style, NORMAL_STYLE};
 use crate::framebuffer::{Framebuffer, UpdateMode};
 use super::{View, Event, Hub, Bus, Id, ID_FEEDER, RenderQueue, RenderData};
-use super::preset::{Preset, PresetKind};
+use super::icon::Icon;
+use super::preset::Preset;
 use crate::gesture::GestureEvent;
 use crate::settings::LightPreset;
 use crate::color::WHITE;
@@ -51,19 +52,18 @@ impl PresetsList {
             let x = self.rect.min.x + dx + position * (preset_width + padding);
             let preset_rect = rect![x, self.rect.max.y - preset_height,
                                     x + preset_width, self.rect.max.y];
-            let kind = if (position == 0 && index > 0) || (position == max_per_line - 1 &&
+            let child: Box<dyn View> = if (position == 0 && index > 0) || (position == max_per_line - 1 &&
                                                            index < presets_count - 1) {
                 let dir = if position == 0 { CycleDir::Previous } else { CycleDir::Next };
-                PresetKind::Page(dir)
+                Box::new(Icon::navigation(preset_rect, dir, Event::Page).without_page_hold())
             } else {
                 let name = presets[index as usize].name();
-                let kind = PresetKind::Normal(name, index as usize);
+                let preset = Preset::new(preset_rect, name, index as usize);
                 index += 1;
-                kind
+                Box::new(preset)
             };
 
-            let preset = Preset::new(preset_rect, kind);
-            children.push(Box::new(preset) as Box<dyn View>);
+            children.push(child);
             item_index += 1;
 
             if item_index % max_per_line == 0 || index == presets_count {
